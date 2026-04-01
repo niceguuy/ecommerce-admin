@@ -350,7 +350,7 @@ export default function ChatEmulator({
         console.error("parse connection failed", error);
       }
 
-      const historyPayload = nextHistory.map((item) => ({
+      const historyPayload = messages.map((item) => ({
         role: item.role,
         text: item.text,
       }));

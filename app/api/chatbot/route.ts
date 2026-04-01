@@ -2076,31 +2076,31 @@ export async function POST(req: Request) {
     const senderName: string = body.senderName || "";
     const chatbot = botId ? await getChatbotById(botId) : null;
 
-const requestProducts: ProductItem[] = Array.isArray(products) ? products : [];
-const dbProducts: ProductItem[] = Array.isArray((chatbot as any)?.products)
-  ? (chatbot as any).products
-  : [];
+    const requestProducts: ProductItem[] = Array.isArray(products) ? products : [];
+    const dbProducts: ProductItem[] = Array.isArray((chatbot as any)?.products)
+      ? (chatbot as any).products
+      : [];
 
-const requestHasImages = requestProducts.some((product) => {
-  const productHasImage = Boolean((product.imagesText || "").trim());
+    const requestHasImages = requestProducts.some((product) => {
+      const productHasImage = Boolean((product.imagesText || "").trim());
 
-  const offerHasImage = Array.isArray(product.offers)
-    ? product.offers.some((offer) => Boolean((offer.imagesText || "").trim()))
-    : false;
+      const offerHasImage = Array.isArray(product.offers)
+        ? product.offers.some((offer) => Boolean((offer.imagesText || "").trim()))
+        : false;
 
-  const faqHasImage = Array.isArray(product.faqBlocks)
-    ? product.faqBlocks.some((faq) => Boolean((faq.imagesText || "").trim()))
-    : false;
+      const faqHasImage = Array.isArray(product.faqBlocks)
+        ? product.faqBlocks.some((faq) => Boolean((faq.imagesText || "").trim()))
+        : false;
 
-  return productHasImage || offerHasImage || faqHasImage;
-});
+      return productHasImage || offerHasImage || faqHasImage;
+    });
 
-const effectiveProducts: ProductItem[] =
-  requestHasImages && requestProducts.length > 0
-    ? requestProducts
-    : dbProducts.length > 0
-    ? dbProducts
-    : requestProducts;
+    const effectiveProducts: ProductItem[] =
+      requestHasImages && requestProducts.length > 0
+        ? requestProducts
+        : dbProducts.length > 0
+          ? dbProducts
+          : requestProducts;
     const effectiveTelegramBotToken =
       (chatbot as any)?.connectionConfig?.telegramBotToken ||
       process.env.TELEGRAM_BOT_TOKEN ||
@@ -2274,6 +2274,29 @@ const effectiveProducts: ProductItem[] =
 
     const productImages = parseImageUrls(selectedProduct?.imagesText || "");
     const faqImages = parseImageUrls(selectedFaq?.imagesText || "");
+
+    const selectedOfferForImages =
+      activeOffers.length > 0
+        ? findSelectedOfferFromConversation(history, message, activeOffers) ||
+        detectRequestedOffer(message, activeOffers) ||
+        activeOffers[0]
+        : null;
+
+    const offerImages = parseImageUrls(selectedOfferForImages?.imagesText || "");
+
+    const fallbackReplyImages = mergeUniqueImageUrls(
+      productImages,
+      offerImages,
+      faqImages
+    );
+
+    console.log("CHATBOT_IMAGE_MERGED_DEBUG", {
+      productImages,
+      offerImages,
+      faqImages,
+      fallbackReplyImages,
+    });
+
     console.log("CHATBOT_IMAGE_DEBUG", {
       botId,
       selectedProductName: selectedProduct?.name || "",
@@ -2290,8 +2313,8 @@ const effectiveProducts: ProductItem[] =
         requestHasImages && requestProducts.length > 0
           ? "requestProducts"
           : dbProducts.length > 0
-          ? "dbProducts"
-          : "requestProducts_fallback",
+            ? "dbProducts"
+            : "requestProducts_fallback",
     });
 
     const botTextRecent = recentBotText(history);
@@ -2760,18 +2783,18 @@ const effectiveProducts: ProductItem[] =
       !explicitOfferSelection
     ) {
       const safeSelectedProduct = selectedProduct;
-    
+
       const reply = buildFirstTouchReply({
         product: safeSelectedProduct,
         offers: offersForFirstReply,
         salesStrategy,
       });
-    
+
       const firstTouchImages = mergeUniqueImageUrls(
         productImages,
         firstReplyImages
       );
-    
+
       return NextResponse.json({
         reply,
         images: firstTouchImages,
@@ -3069,32 +3092,34 @@ const effectiveProducts: ProductItem[] =
           salesStrategy: effectiveSalesStrategy,
         });
 
-        console.log("CHATBOT_IMAGE_SOURCE_DEBUG", {
-          message,
-          selectedProductName: selectedProduct?.name,
-          selectedProductImagesText: selectedProduct?.imagesText,
-          productImages,
-          offersForFirstReply: offersForFirstReply.map((offer) => ({
-            title: offer.title,
-            imagesText: offer.imagesText,
-          })),
-          firstReplyImages,
-        });
+      console.log("CHATBOT_IMAGE_SOURCE_DEBUG", {
+        message,
+        selectedProductName: selectedProduct?.name,
+        selectedProductImagesText: selectedProduct?.imagesText,
+        productImages,
+        offersForFirstReply: offersForFirstReply.map((offer) => ({
+          title: offer.title,
+          imagesText: offer.imagesText,
+        })),
+        firstReplyImages,
+      });
 
-        const firstImages = [
-          ...productImages,
-          ...firstReplyImages,
-        ].filter(Boolean).slice(0, 5);
+      const firstImages = mergeUniqueImageUrls(
+        productImages,
+        firstReplyImages,
+        offerImages,
+        faqImages
+      );
+      
+      console.log("CHATBOT_IMAGE_FINAL_DEBUG", {
+        firstImages,
+        replyPreview: reply?.slice?.(0, 120) || "",
+      });
 
-        console.log("CHATBOT_IMAGE_FINAL_DEBUG", {
-          firstImages,
-          replyPreview: reply?.slice?.(0, 120) || "",
-        });
-        
-        return NextResponse.json({
-          reply,
-          images: firstImages,
-        });
+      return NextResponse.json({
+        reply,
+        images: firstImages,
+      });
     }
 
     if (selectedProduct) {
