@@ -2075,6 +2075,32 @@ export async function POST(req: Request) {
     const history: ChatHistoryItem[] = Array.isArray(body.history) ? body.history : [];
     const senderName: string = body.senderName || "";
     const chatbot = botId ? await getChatbotById(botId) : null;
+
+const requestProducts: ProductItem[] = Array.isArray(products) ? products : [];
+const dbProducts: ProductItem[] = Array.isArray((chatbot as any)?.products)
+  ? (chatbot as any).products
+  : [];
+
+const requestHasImages = requestProducts.some((product) => {
+  const productHasImage = Boolean((product.imagesText || "").trim());
+
+  const offerHasImage = Array.isArray(product.offers)
+    ? product.offers.some((offer) => Boolean((offer.imagesText || "").trim()))
+    : false;
+
+  const faqHasImage = Array.isArray(product.faqBlocks)
+    ? product.faqBlocks.some((faq) => Boolean((faq.imagesText || "").trim()))
+    : false;
+
+  return productHasImage || offerHasImage || faqHasImage;
+});
+
+const effectiveProducts: ProductItem[] =
+  requestHasImages && requestProducts.length > 0
+    ? requestProducts
+    : dbProducts.length > 0
+    ? dbProducts
+    : requestProducts;
     const effectiveTelegramBotToken =
       (chatbot as any)?.connectionConfig?.telegramBotToken ||
       process.env.TELEGRAM_BOT_TOKEN ||
@@ -2109,9 +2135,6 @@ export async function POST(req: Request) {
         }
         : salesStrategy;
 
-    const effectiveProducts: ProductItem[] = Array.isArray((chatbot as any)?.products)
-      ? (chatbot as any).products
-      : products;
     const hasImageInput = images.length > 0;
 
     const safeMessage = typeof message === "string" ? message.trim() : "";
@@ -2251,6 +2274,25 @@ export async function POST(req: Request) {
 
     const productImages = parseImageUrls(selectedProduct?.imagesText || "");
     const faqImages = parseImageUrls(selectedFaq?.imagesText || "");
+    console.log("CHATBOT_IMAGE_DEBUG", {
+      botId,
+      selectedProductName: selectedProduct?.name || "",
+      selectedProductImagesText: selectedProduct?.imagesText || "",
+      productImages,
+      offersForDebug: (selectedProduct?.offers || []).map((offer) => ({
+        title: offer.title,
+        imagesText: offer.imagesText || "",
+      })),
+      requestProductsCount: requestProducts.length,
+      dbProductsCount: dbProducts.length,
+      requestHasImages,
+      usingSource:
+        requestHasImages && requestProducts.length > 0
+          ? "requestProducts"
+          : dbProducts.length > 0
+          ? "dbProducts"
+          : "requestProducts_fallback",
+    });
 
     const botTextRecent = recentBotText(history);
 
