@@ -3218,13 +3218,13 @@ ${message}
       const activeOffersForImages = (selectedProduct.offers || []).filter(
         (offer) => offer.isActive
       );
-
-      const selectedOfferForImagePool =
+      
+      const selectedOfferForImages =
         findSelectedOfferFromConversation(history, message, activeOffersForImages) ||
         detectRequestedOffer(message, activeOffersForImages) ||
         activeOffersForImages[0] ||
         null;
-
+      
       const fallbackProductImages = parseImageUrls(selectedProduct.imagesText || "");
       const fallbackOfferImages = selectedOfferForImages
         ? parseImageUrls(selectedOfferForImages.imagesText || "")
@@ -3232,13 +3232,13 @@ ${message}
       const fallbackFaqImages = selectedFaq
         ? parseImageUrls(selectedFaq.imagesText || "")
         : [];
-
+      
       const responseImages = mergeUniqueImageUrls(
         fallbackProductImages,
         fallbackOfferImages,
         fallbackFaqImages
       );
-
+      
       console.log("CHATBOT_SELECTED_PRODUCT_RESPONSE_DEBUG", {
         selectedProductName: selectedProduct.name,
         fallbackProductImages,
@@ -3246,7 +3246,7 @@ ${message}
         fallbackFaqImages,
         responseImages,
       });
-
+      
       return NextResponse.json({
         reply: response.text || "ไม่มีคำตอบ",
         images: responseImages,
