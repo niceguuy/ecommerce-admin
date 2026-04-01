@@ -2403,6 +2403,41 @@ export async function POST(req: Request) {
 
     });
     const missingFields = getMissingCustomerFields(finalCustomerInfo);
+    const activeOffersForImagePool = (selectedProduct?.offers || []).filter(
+      (offer) => offer.isActive
+    );
+    
+    const selectedOfferForImagePool =
+      findSelectedOfferFromConversation(history, message, activeOffersForImagePool) ||
+      detectRequestedOffer(message, activeOffersForImagePool) ||
+      activeOffersForImagePool[0] ||
+      null;
+    
+    const sharedProductImages = selectedProduct
+      ? parseImageUrls(selectedProduct.imagesText || "")
+      : [];
+    
+    const sharedOfferImages = selectedOfferForImagePool
+      ? parseImageUrls(selectedOfferForImagePool.imagesText || "")
+      : [];
+    
+    const sharedFaqImages = selectedFaq
+      ? parseImageUrls(selectedFaq.imagesText || "")
+      : [];
+    
+    const sharedResponseImages = mergeUniqueImageUrls(
+      sharedProductImages,
+      sharedOfferImages,
+      sharedFaqImages
+    );
+    
+    console.log("CHATBOT_SHARED_RESPONSE_IMAGES_DEBUG", {
+      selectedProductName: selectedProduct?.name || "",
+      sharedProductImages,
+      sharedOfferImages,
+      sharedFaqImages,
+      sharedResponseImages,
+    });
     const botAskedForInfo = hasBotAskedForCustomerInfo(history);
     const hasSavedImageInfoBefore = hasSavedImageInfoInHistory(history);
     const botAskedToConfirmImageInfo = hasBotAskedToConfirmImageInfo(history);
@@ -2911,20 +2946,14 @@ export async function POST(req: Request) {
         !containsCustomerInfo(message) &&
         !editIntent.isEdit
       ) {
-        return NextResponse.json({
-          reply: "น้องรอข้อมูลที่ขาดอยู่นะคะ 😊",
-          images: [],
+        console.log("CHATBOT_RETURN_WAITING_INFO_DEBUG", {
+          message,
+          sharedResponseImages,
         });
-      }
-
-      if (
-        hasBotRecentlyAskedForSameMissingFields(history, missingFields) &&
-        !containsCustomerInfo(message) &&
-        !editIntent.isEdit
-      ) {
+      
         return NextResponse.json({
           reply: "น้องรอข้อมูลที่ขาดอยู่นะคะ 😊",
-          images: [],
+          images: sharedResponseImages,
         });
       }
 
@@ -2933,10 +2962,15 @@ export async function POST(req: Request) {
         offer: finalOffer,
         missingFields,
       });
-
+      
+      console.log("CHATBOT_RETURN_NEED_MORE_INFO_DEBUG", {
+        replyPreview: reply?.slice(0, 120) || "",
+        sharedResponseImages,
+      });
+      
       return NextResponse.json({
         reply,
-        images: [],
+        images: sharedResponseImages,
       });
     }
 
@@ -2958,9 +2992,14 @@ export async function POST(req: Request) {
         requestedQuantityText,
       });
 
+      console.log("CHATBOT_RETURN_SELECT_OFFER_DEBUG", {
+        replyPreview: reply?.slice(0, 120) || "",
+        sharedResponseImages,
+      });
+      
       return NextResponse.json({
         reply,
-        images: [],
+        images: sharedResponseImages,
       });
     }
 
@@ -2981,9 +3020,14 @@ export async function POST(req: Request) {
         requestedQuantityText,
       });
 
+      console.log("CHATBOT_RETURN_SELECT_QTY_OFFER_DEBUG", {
+        replyPreview: reply?.slice(0, 120) || "",
+        sharedResponseImages,
+      });
+      
       return NextResponse.json({
         reply,
-        images: [],
+        images: sharedResponseImages,
       });
     }
 
@@ -3000,9 +3044,14 @@ export async function POST(req: Request) {
         offers: activeOffers,
       });
 
+      console.log("CHATBOT_RETURN_SELECT_ACTIVE_OFFER_DEBUG", {
+        replyPreview: reply?.slice(0, 120) || "",
+        sharedResponseImages,
+      });
+      
       return NextResponse.json({
         reply,
-        images: [],
+        images: sharedResponseImages,
       });
     }
 
@@ -3170,7 +3219,7 @@ ${message}
         (offer) => offer.isActive
       );
 
-      const selectedOfferForImages =
+      const selectedOfferForImagePool =
         findSelectedOfferFromConversation(history, message, activeOffersForImages) ||
         detectRequestedOffer(message, activeOffersForImages) ||
         activeOffersForImages[0] ||
@@ -3222,7 +3271,7 @@ ${message}
       message,
       hasSelectedProduct: Boolean(selectedProduct),
     });
-    
+
     return NextResponse.json({
       reply: response.text || "ไม่มีคำตอบ",
       images: [],
