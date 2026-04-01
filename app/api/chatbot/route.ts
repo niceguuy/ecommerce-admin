@@ -3110,7 +3110,7 @@ export async function POST(req: Request) {
         offerImages,
         faqImages
       );
-      
+
       console.log("CHATBOT_IMAGE_FINAL_DEBUG", {
         firstImages,
         replyPreview: reply?.slice?.(0, 120) || "",
@@ -3166,9 +3166,41 @@ ${message}
         contents: prompt,
       });
 
+      const activeOffersForImages = (selectedProduct.offers || []).filter(
+        (offer) => offer.isActive
+      );
+
+      const selectedOfferForImages =
+        findSelectedOfferFromConversation(history, message, activeOffersForImages) ||
+        detectRequestedOffer(message, activeOffersForImages) ||
+        activeOffersForImages[0] ||
+        null;
+
+      const fallbackProductImages = parseImageUrls(selectedProduct.imagesText || "");
+      const fallbackOfferImages = selectedOfferForImages
+        ? parseImageUrls(selectedOfferForImages.imagesText || "")
+        : [];
+      const fallbackFaqImages = selectedFaq
+        ? parseImageUrls(selectedFaq.imagesText || "")
+        : [];
+
+      const responseImages = mergeUniqueImageUrls(
+        fallbackProductImages,
+        fallbackOfferImages,
+        fallbackFaqImages
+      );
+
+      console.log("CHATBOT_SELECTED_PRODUCT_RESPONSE_DEBUG", {
+        selectedProductName: selectedProduct.name,
+        fallbackProductImages,
+        fallbackOfferImages,
+        fallbackFaqImages,
+        responseImages,
+      });
+
       return NextResponse.json({
         reply: response.text || "ไม่มีคำตอบ",
-        images: productImages,
+        images: responseImages,
       });
     }
 
@@ -3186,6 +3218,11 @@ ${message}
 `,
     });
 
+    console.log("CHATBOT_EMPTY_IMAGE_FALLBACK_DEBUG", {
+      message,
+      hasSelectedProduct: Boolean(selectedProduct),
+    });
+    
     return NextResponse.json({
       reply: response.text || "ไม่มีคำตอบ",
       images: [],
