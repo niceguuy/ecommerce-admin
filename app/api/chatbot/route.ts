@@ -3027,10 +3027,28 @@ export async function POST(req: Request) {
           salesStrategy: effectiveSalesStrategy,
         });
 
-      return NextResponse.json({
-        reply,
-        images: firstReplyImages.length > 0 ? firstReplyImages : productImages,
-      });
+        console.log("FIRST_REPLY_DEBUG", {
+          productName: selectedProduct?.name,
+          message,
+          productImages,
+          firstReplyImages,
+          offersForFirstReply: offersForFirstReply.map((offer) => ({
+            title: offer.title,
+            imagesText: offer.imagesText,
+          })),
+        });
+
+        const firstImages = [
+          ...productImages,
+          ...firstReplyImages,
+        ].filter(Boolean).slice(0, 5);
+
+        console.log("FIRST_REPLY_FINAL_IMAGES", firstImages);
+        
+        return NextResponse.json({
+          reply,
+          images: firstImages,
+        });
     }
 
     if (selectedProduct) {
