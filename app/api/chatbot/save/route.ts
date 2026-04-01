@@ -26,6 +26,19 @@ export async function POST(req: Request) {
     const botEnabled =
       typeof body.botEnabled === "boolean" ? body.botEnabled : undefined;
     const products = Array.isArray(body.products) ? body.products : [];
+    console.log(
+      "SAVE_ROUTE_PRODUCTS_DEBUG",
+      products.map((product: any) => ({
+        name: product?.name,
+        imagesText: product?.imagesText,
+        offers: Array.isArray(product?.offers)
+          ? product.offers.map((offer: any) => ({
+              title: offer?.title,
+              imagesText: offer?.imagesText,
+            }))
+          : [],
+      }))
+    );
     const salesStrategy = body.salesStrategy || null;
     const connection = normalizeConnectionConfig(body.connection);
 

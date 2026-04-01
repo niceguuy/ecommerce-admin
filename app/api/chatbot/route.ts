@@ -3027,15 +3027,16 @@ export async function POST(req: Request) {
           salesStrategy: effectiveSalesStrategy,
         });
 
-        console.log("FIRST_REPLY_DEBUG", {
-          productName: selectedProduct?.name,
+        console.log("CHATBOT_IMAGE_SOURCE_DEBUG", {
           message,
+          selectedProductName: selectedProduct?.name,
+          selectedProductImagesText: selectedProduct?.imagesText,
           productImages,
-          firstReplyImages,
           offersForFirstReply: offersForFirstReply.map((offer) => ({
             title: offer.title,
             imagesText: offer.imagesText,
           })),
+          firstReplyImages,
         });
 
         const firstImages = [
@@ -3043,7 +3044,10 @@ export async function POST(req: Request) {
           ...firstReplyImages,
         ].filter(Boolean).slice(0, 5);
 
-        console.log("FIRST_REPLY_FINAL_IMAGES", firstImages);
+        console.log("CHATBOT_IMAGE_FINAL_DEBUG", {
+          firstImages,
+          replyPreview: reply?.slice?.(0, 120) || "",
+        });
         
         return NextResponse.json({
           reply,

@@ -754,6 +754,19 @@ export default function TrainingPanel({
       setIsSaving(true);
       setSaveMessage("");
   
+      console.log("TRAINING_SAVE_PRODUCTS_DEBUG", products.map((product) => ({
+        name: product.name,
+        imagesText: product.imagesText,
+        offers: (product.offers || []).map((offer) => ({
+          title: offer.title,
+          imagesText: offer.imagesText,
+        })),
+        faqBlocks: (product.faqBlocks || []).map((faq) => ({
+          label: faq.label,
+          imagesText: faq.imagesText,
+        })),
+      })));
+
       const response = await fetch("/api/chatbot/save", {
         method: "POST",
         headers: {
