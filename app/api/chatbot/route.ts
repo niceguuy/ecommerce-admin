@@ -2965,7 +2965,7 @@ export async function POST(req: Request) {
       !containsCustomerInfo(message) &&
       (
         broadPriceIntent ||
-        (isInterestIntent(message) && !bareInterestMessage)
+        isInterestIntent(message)
       )
     ) {
 
