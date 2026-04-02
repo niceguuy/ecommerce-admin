@@ -2331,8 +2331,10 @@ export async function POST(req: Request) {
       parseImageUrls(offer.imagesText || "")
     );
 
-    const firstTouchImages = fallbackReplyImages;
+    const firstTouchImages = mergeUniqueImageUrls(
+      fallbackReplyImages,
       firstReplyImages
+    );
 
     const faqIntent = isFaqIntent(safeMessage) || selectedFaq !== null;
     const broadPriceIntent = isBroadPriceIntent(safeMessage);
@@ -2424,7 +2426,7 @@ export async function POST(req: Request) {
         selectedProduct.name || "",
         selectedFaq.answer || "",
         effectiveSalesStrategy.closingQuestionStyle ||
-          "ถ้าต้องการ เดี๋ยวแนะนำต่อให้เหมาะกับหน้างานได้ค่ะ",
+        "ถ้าต้องการ เดี๋ยวแนะนำต่อให้เหมาะกับหน้างานได้ค่ะ",
       ]
         .filter(Boolean)
         .join("\n\n");
@@ -2441,10 +2443,10 @@ export async function POST(req: Request) {
      */
     if (
       selectedProduct &&
-      firstCustomerMessage &&
       !finalOffer &&
       effectiveSalesStrategy.showOffersInFirstReply &&
       offersForFirstReply.length > 0 &&
+      !hasRecentlySentPromoBlock(history) &&
       !shouldNotShowOffersAgain &&
       !hasBotAskedForCustomerInfo(history) &&
       !containsCustomerInfo(message) &&
@@ -2520,7 +2522,7 @@ export async function POST(req: Request) {
             ? parsedImageData.name || ""
             : finalCustomerInfo.name || ""
           : finalCustomerInfo.name ||
-            (reliableImageName ? parsedImageData.name || "" : ""),
+          (reliableImageName ? parsedImageData.name || "" : ""),
         phone: finalCustomerInfo.phone || parsedImageData.phone || "",
         address: finalCustomerInfo.address || parsedImageData.address || "",
         facebookName: finalCustomerInfo.facebookName || senderName || "",
@@ -2694,12 +2696,10 @@ export async function POST(req: Request) {
     ) {
       const promoContext = [
         `บทบาทบอท: ${effectiveBotRole || "คุณคือแอดมินขายของออนไลน์"}`,
-        `กฎการตอบ: ${
-          effectiveBotRules ||
-          "ตอบเหมือนแอดมินขายจริง สุภาพ เป็นกันเอง ปิดการขายแบบธรรมชาติ"
+        `กฎการตอบ: ${effectiveBotRules ||
+        "ตอบเหมือนแอดมินขายจริง สุภาพ เป็นกันเอง ปิดการขายแบบธรรมชาติ"
         }`,
-        `น้ำเสียง: ${
-          effectiveSalesStrategy.toneStyle || "สุภาพ เป็นกันเอง แบบคนขายจริง"
+        `น้ำเสียง: ${effectiveSalesStrategy.toneStyle || "สุภาพ เป็นกันเอง แบบคนขายจริง"
         }`,
         `สไตล์เปิดบทสนทนา: ใช้เป็นแนวทางภายในเท่านั้น อย่าพูดข้อความคำสั่งนี้ตรง ๆ กับลูกค้า`,
         effectiveSalesStrategy.openingStyle
