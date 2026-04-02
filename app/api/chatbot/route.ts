@@ -2329,41 +2329,20 @@ export async function POST(req: Request) {
 
     const firstReplyImages = offersForFirstReply.flatMap((offer) =>
       parseImageUrls(offer.imagesText || "")
-
     );
 
-    const firstImages = [
-      ...productImages,
-      ...firstReplyImages,
-    ].slice(0, 5);
     const faqIntent = isFaqIntent(safeMessage) || selectedFaq !== null;
     const broadPriceIntent = isBroadPriceIntent(safeMessage);
     const explicitOfferSelection = isExplicitOfferSelection(safeMessage);
-
-    if (
-      !finalOffer &&
-      activeOffers.length === 1 &&
-      explicitOfferSelection
-    ) {
-      finalOffer = activeOffers[0];
-    }
-
     const bareInterestMessage = isBareInterestMessage(safeMessage);
-
     const urgencyIntent = hasUrgencyIntent(safeMessage);
     const confirmationIntent = isConfirmationIntent(safeMessage);
     const conversationState = detectConversationState(messages);
 
-    if (
-      conversationState === "order_summarized" &&
-      isShortFollowupAfterSummary(safeMessage) &&
-      !editIntent.isEdit
-    ) {
-      return NextResponse.json({
-        reply: "ขอบคุณมากค่ะ 🙏 เดี๋ยวน้องดำเนินการจัดส่งให้เรียบร้อยนะคะ",
-        images: [],
-      });
+    if (!finalOffer && activeOffers.length === 1 && explicitOfferSelection) {
+      finalOffer = activeOffers[0];
     }
+
     const customerInfoFromHistory = editIntent.isEdit
       ? extractCustomerInfoFromHistory(messages, "")
       : extractCustomerInfoFromHistory(messages, safeMessage);
@@ -2390,25 +2369,26 @@ export async function POST(req: Request) {
       facebookName: senderName || editedCustomerInfo.facebookName || "",
     };
 
-    const hasCustomerData =
-      finalCustomerInfo.name || finalCustomerInfo.phone || finalCustomerInfo.address;
-
-    const hasAnyCustomerInfo = Boolean(
+    const hasCustomerData = Boolean(
       finalCustomerInfo.name ||
       finalCustomerInfo.phone ||
       finalCustomerInfo.address
     );
 
+    const hasAnyCustomerInfo = hasCustomerData;
+
     const hasCompleteInfo = hasCompleteCustomerInfo(finalCustomerInfo, {
       allowFacebookName: true,
-
     });
+
     const missingFields = getMissingCustomerFields(finalCustomerInfo);
+
     const activeOffersForImagePool = (selectedProduct?.offers || []).filter(
       (offer) => offer.isActive
     );
 
     const selectedOfferForImagePool =
+      finalOffer ||
       findSelectedOfferFromConversation(history, message, activeOffersForImagePool) ||
       detectRequestedOffer(message, activeOffersForImagePool) ||
       activeOffersForImagePool[0] ||
@@ -2428,6 +2408,7 @@ export async function POST(req: Request) {
 
     const sharedResponseImages = mergeUniqueImageUrls(
       sharedProductImages,
+      firstReplyImages,
       sharedOfferImages,
       sharedFaqImages
     );
@@ -2435,274 +2416,117 @@ export async function POST(req: Request) {
     console.log("CHATBOT_SHARED_RESPONSE_IMAGES_DEBUG", {
       selectedProductName: selectedProduct?.name || "",
       sharedProductImages,
+      firstReplyImages,
       sharedOfferImages,
       sharedFaqImages,
       sharedResponseImages,
     });
+
     const botAskedForInfo = hasBotAskedForCustomerInfo(history);
     const hasSavedImageInfoBefore = hasSavedImageInfoInHistory(history);
     const botAskedToConfirmImageInfo = hasBotAskedToConfirmImageInfo(history);
     const hasSummarizedBefore = hasSummarizedOrderInHistory(history);
-    const telegramEventType: TelegramOrderEventType = hasSummarizedBefore ? "ORDER_UPDATED" : "NEW_ORDER";
+    const telegramEventType: TelegramOrderEventType = hasSummarizedBefore
+      ? "ORDER_UPDATED"
+      : "NEW_ORDER";
 
+    const firstCustomerMessage = isFirstCustomerMessage(history);
+
+    const shouldNotShowOffersAgain =
+      hasAnyCustomerInfo ||
+      conversationState === "awaiting_customer_info" ||
+      conversationState === "order_summarized" ||
+      explicitOfferSelection;
+
+    /**
+     * 0) ถ้าสรุปออเดอร์ไปแล้ว และลูกค้าส่งข้อความสั้น ๆ ตามมา
+     */
     if (
-      hasSummarizedBefore &&
-      isShortFollowupAfterSummary(message)
+      conversationState === "order_summarized" &&
+      isShortFollowupAfterSummary(safeMessage) &&
+      !editIntent.isEdit
     ) {
       return NextResponse.json({
-        reply: buildAlreadySummarizedReply(),
+        reply: "ขอบคุณมากค่ะ 🙏 เดี๋ยวน้องดำเนินการจัดส่งให้เรียบร้อยนะคะ",
         images: [],
       });
     }
 
-    if (
-      hasSavedImageInfoBefore &&
-      selectedProduct &&
-      finalOffer &&
-      !confirmationIntent &&
-      !hasSummarizedBefore
-    ) {
-      const imageCustomerInfo = mergeCustomerInfo(
-        extractCustomerInfoFromBotImageConfirmation(history),
-        finalCustomerInfo
-      );
-
-      if (
-        hasCompleteCustomerInfo(imageCustomerInfo, {
-          allowFacebookName: true,
-        })
-      ) {
-        const reply = buildOrderSummaryText({
-          product: selectedProduct,
-          offer: finalOffer,
-          customerInfo: imageCustomerInfo,
-        });
-
-        const orderId = buildOrderId({
-          product: selectedProduct,
-          customerInfo: imageCustomerInfo,
-        });
-
-        const telegramMessage = buildTelegramOrderMessage({
-          eventType: telegramEventType,
-          orderId,
-          product: selectedProduct,
-          offer: finalOffer,
-          customerInfo: imageCustomerInfo,
-          botName: chatbot?.name || "",
-          pageName:
-            (chatbot as any)?.connectionConfig?.facebookPageName ||
-            chatbot?.pageName ||
-            "",
-        });
-
-        try {
-          await sendTelegramMessage({
-            text: telegramMessage,
-            chatId: effectiveTelegramChatId,
-            botToken: effectiveTelegramBotToken,
-            threadId: effectiveTelegramThreadId,
-          });
-        } catch (error) {
-          console.error("Telegram error:", error);
-        }
-
-        return NextResponse.json({
-          reply,
-          images: [],
-        });
-      }
-
-      const missingLabels = getMissingCustomerFields(imageCustomerInfo)
-        .map((field) => {
-          if (field === "phone") return "เบอร์โทร";
-          if (field === "address") return "ที่อยู่";
-          if (field === "name") return "ชื่อ";
-          return field;
-        })
-        .join(" และ ");
-
-      return NextResponse.json({
-        reply: `ยังขาด${missingLabels}อยู่ค่ะ รบกวนส่งเพิ่มให้น้องอีกนิดนะคะ 😊`,
-        images: [],
-      });
-    }
-
-    if (
-      confirmationIntent &&
-      botAskedToConfirmImageInfo &&
-      selectedProduct &&
-      finalOffer
-    ) {
-      const confirmedCustomerInfo = mergeCustomerInfo(
-        extractCustomerInfoFromBotImageConfirmation(history),
-        finalCustomerInfo
-      );
-
-      if (
-        hasCompleteCustomerInfo(confirmedCustomerInfo, {
-          allowFacebookName: true,
-        })
-      ) {
-        const reply = buildOrderSummaryText({
-          product: selectedProduct,
-          offer: finalOffer,
-          customerInfo: confirmedCustomerInfo,
-        });
-
-        const orderId = buildOrderId({
-          product: selectedProduct,
-          customerInfo: confirmedCustomerInfo,
-        });
-
-        const telegramMessage = buildTelegramOrderMessage({
-          eventType: telegramEventType,
-          orderId,
-          product: selectedProduct,
-          offer: finalOffer,
-          customerInfo: confirmedCustomerInfo,
-          botName: chatbot?.name || "",
-          pageName:
-            (chatbot as any)?.connectionConfig?.facebookPageName ||
-            chatbot?.pageName ||
-            "",
-        });
-
-        try {
-          await sendTelegramMessage({
-            text: telegramMessage,
-            chatId: effectiveTelegramChatId,
-            botToken: effectiveTelegramBotToken,
-            threadId: effectiveTelegramThreadId,
-          });
-        } catch (error) {
-          console.error("Telegram error:", error);
-        }
-
-        return NextResponse.json({
-          reply,
-          images: [],
-        });
-      }
-
-      const missingLabels = getMissingCustomerFields(confirmedCustomerInfo)
-        .map((field) => {
-          if (field === "phone") return "เบอร์โทร";
-          if (field === "address") return "ที่อยู่";
-          return field;
-        })
-        .join(" และ ");
-
-      return NextResponse.json({
-        reply: `ยังขาด${missingLabels}อยู่ค่ะ รบกวนส่งเพิ่มให้น้องอีกนิดนะคะ 😊`,
-        images: [],
-      });
-    }
-
-    if (
-      effectiveSalesStrategy.enableUrgency &&
-      selectedProduct &&
-      finalOffer &&
-      urgencyIntent &&
-      !hasCompleteInfo
-    ) {
-      const missingLabels = missingFields.map((field) => {
-        if (field === "phone") return "เบอร์โทร";
-        if (field === "address") return "ที่อยู่";
-        if (field === "name") return "ชื่อ";
-        return field;
-      });
-
-      const missingText =
-        missingLabels.length === 1
-          ? missingLabels[0]
-          : missingLabels.join(" และ ");
-
-      return NextResponse.json({
-        reply: [
-          `${selectedProduct.name}`,
-          `รับเป็น ${finalOffer.title} ได้เลยค่ะ 🔥`,
-          finalOffer.price ? `ยอดเก็บปลายทาง ${finalOffer.price} บาท` : "",
-          finalOffer.note || "",
-          effectiveSalesStrategy.urgencyStyle?.trim() ||
-          `ถ้าสะดวก รบกวนส่ง${missingText}มาได้เลยนะคะ เดี๋ยวน้องรีบสรุปออเดอร์ให้ทันทีค่ะ 😊`,
-        ]
-          .filter(Boolean)
-          .join("\n"),
-        images: [],
-      });
-    }
-
-    if (
-      selectedProduct &&
-      finalOffer &&
-      hasCompleteInfo &&
-      !hasSummarizedBefore
-    ) {
-      const reply = buildOrderSummaryText({
-        product: selectedProduct,
-        offer: finalOffer,
-        customerInfo: finalCustomerInfo,
-      });
-
-      const orderId = buildOrderId({
-        product: selectedProduct,
-        customerInfo: finalCustomerInfo,
-      });
-
-      const telegramMessage = buildTelegramOrderMessage({
-        eventType: telegramEventType,
-        orderId,
-        product: selectedProduct,
-        offer: finalOffer,
-        customerInfo: finalCustomerInfo,
-      });
-
-      try {
-        await sendTelegramMessage({
-          text: telegramMessage,
-          chatId: effectiveTelegramChatId,
-          botToken: effectiveTelegramBotToken,
-          threadId: effectiveTelegramThreadId,
-        });
-      } catch (error) {
-        console.error("Telegram error:", error);
-      }
+    /**
+     * 1) FAQ มาก่อน
+     */
+    if (faqIntent && selectedFaq && selectedProduct) {
+      const reply = [
+        selectedProduct.name || "",
+        selectedFaq.answer || "",
+        effectiveSalesStrategy.closingQuestionStyle ||
+        "ถ้าต้องการ เดี๋ยวแนะนำต่อให้เหมาะกับหน้างานได้ค่ะ",
+      ]
+        .filter(Boolean)
+        .join("\n\n");
 
       return NextResponse.json({
         reply,
-        images: [],
+        images: sharedResponseImages,
       });
     }
 
+    /**
+     * 2) ทักมาสนใจ / ขอราคา / ขอโปร ครั้งแรก -> ส่งข้อความ + รูปทันที
+     * อันนี้คือจุดที่ต้องให้ชนะ branch อื่น
+     */
     if (
       selectedProduct &&
-      finalOffer &&
-      missingFields.length > 0 &&
-      hasBotRecentlyAskedForSameMissingFields(history, missingFields)
+      !finalOffer &&
+      effectiveSalesStrategy.showOffersInFirstReply &&
+      offersForFirstReply.length > 0 &&
+      !shouldNotShowOffersAgain &&
+      !hasBotAskedForCustomerInfo(history) &&
+      !containsCustomerInfo(message) &&
+      (broadPriceIntent || isInterestIntent(safeMessage) || bareInterestMessage)
     ) {
+      const reply = buildFirstTouchReply({
+        product: selectedProduct,
+        offers: offersForFirstReply,
+        salesStrategy: effectiveSalesStrategy,
+      });
+
+      console.log("CHATBOT_RETURN_FIRST_TOUCH_DEBUG", {
+        replyPreview: reply?.slice(0, 120) || "",
+        sharedResponseImages,
+      });
+
       return NextResponse.json({
-        reply: "น้องรอข้อมูลที่ยังขาดอยู่นะคะ 😊 ส่งเพิ่มได้เลย เดี๋ยวน้องสรุปให้ต่อทันทีค่ะ",
-        images: [],
+        reply,
+        images: sharedResponseImages,
       });
     }
 
+    /**
+     * 3) ลูกค้าส่งข้อมูลมาแล้ว แต่ยังไม่ได้เลือกโปร
+     */
     if (
       selectedProduct &&
-      finalOffer &&
-      missingFields.length > 0 &&
-      !hasBotRecentlyAskedForSameMissingFields(history, missingFields)
+      !finalOffer &&
+      hasAnyCustomerInfo &&
+      activeOffers.length > 1 &&
+      !explicitOfferSelection
     ) {
+      const reply = buildOfferSelectionAfterCustomerInfoReply({
+        product: selectedProduct,
+        offers: activeOffers,
+        customerInfo: editedCustomerInfo,
+      });
+
       return NextResponse.json({
-        reply: buildNeedMoreInfoReply({
-          product: selectedProduct,
-          offer: finalOffer,
-          missingFields,
-        }),
-        images: [],
+        reply,
+        images: sharedResponseImages,
       });
     }
 
+    /**
+     * 4) ถ้ามีรูปที่ลูกค้าส่งเข้ามา
+     */
     if (hasImageInput) {
       const imageInstruction = buildImageReadInstruction();
       const imageParts = buildImageParts(images);
@@ -2727,10 +2551,11 @@ export async function POST(req: Request) {
       const mergedCustomerInfo: ExtractedCustomerInfo = {
         ...finalCustomerInfo,
         name: shouldUseImageNameFirst(finalCustomerInfo.name)
-          ? (reliableImageName
+          ? reliableImageName
             ? parsedImageData.name || ""
-            : finalCustomerInfo.name || "")
-          : finalCustomerInfo.name || (reliableImageName ? parsedImageData.name || "" : ""),
+            : finalCustomerInfo.name || ""
+          : finalCustomerInfo.name ||
+          (reliableImageName ? parsedImageData.name || "" : ""),
         phone: finalCustomerInfo.phone || parsedImageData.phone || "",
         address: finalCustomerInfo.address || parsedImageData.address || "",
         facebookName: finalCustomerInfo.facebookName || senderName || "",
@@ -2766,6 +2591,7 @@ export async function POST(req: Request) {
           .map((field) => {
             if (field === "phone") return "เบอร์โทร";
             if (field === "address") return "ที่อยู่";
+            if (field === "name") return "ชื่อ";
             return field;
           })
           .join(" และ ");
@@ -2782,128 +2608,15 @@ export async function POST(req: Request) {
       });
     }
 
-    if (
-      conversationState === "order_summarized" &&
-      isShortFollowupAfterSummary(message) &&
-      !editIntent.isEdit
-    ) {
-      return NextResponse.json({
-        reply: buildAlreadySummarizedReply(),
-        images: [],
-      });
-    }
-
-    // 1) ถ้าถาม FAQ ให้ตอบ block ก่อนเลย
-    if (faqIntent && selectedFaq && selectedProduct) {
-      const reply = [
-        selectedProduct.name || "",
-        selectedFaq.answer || "",
-        salesStrategy.closingQuestionStyle ||
-        "ถ้าต้องการ เดี๋ยวแนะนำต่อให้เหมาะกับหน้างานได้ค่ะ",
-      ]
-        .filter(Boolean)
-        .join("\n\n");
-
-      return NextResponse.json({
-        reply,
-        images: sharedResponseImages,
-      });
-    }
-
-    // 2) ถ้ายังไม่ได้เลือกโปร แต่ลูกค้าทักแนวสนใจ/ราคา/ขอโปร -> ส่งโปรก่อนทันที
-    if (
-      selectedProduct &&
-      salesStrategy.showOffersInFirstReply &&
-      offersForFirstReply.length > 0 &&
-      (broadPriceIntent || isInterestIntent(message)) &&
-      !explicitOfferSelection
-    ) {
-      const safeSelectedProduct = selectedProduct;
-
-      const reply = buildFirstTouchReply({
-        product: safeSelectedProduct,
-        offers: offersForFirstReply,
-        salesStrategy,
-      });
-
-      const firstTouchImages = mergeUniqueImageUrls(
-        productImages,
-        firstReplyImages
-      );
-
-      return NextResponse.json({
-        reply,
-        images: firstTouchImages,
-      });
-    }
-
-    // 3) ถ้าลูกค้าส่งชื่อ/เบอร์/ที่อยู่มาก่อน แต่ยังไม่ได้เลือกโปร -> ส่งโปรให้เลือก
-    if (
-      selectedProduct &&
-      !finalOffer &&
-      hasAnyCustomerInfo &&
-      activeOffers.length > 1 &&
-      !explicitOfferSelection
-    ) {
-      const reply = buildOfferSelectionAfterCustomerInfoReply({
-        product: selectedProduct,
-        offers: activeOffers,
-        customerInfo: editedCustomerInfo,
-      });
-
-      return NextResponse.json({
-        reply,
-        images: sharedResponseImages,
-      });
-    }
-
+    /**
+     * 5) ถ้าเลือกโปรแล้ว และข้อมูลครบ -> สรุปออเดอร์
+     */
     if (
       selectedProduct &&
       finalOffer &&
-      hasSavedImageInfoBefore &&
-      botAskedToConfirmImageInfo &&
-      !confirmationIntent
+      hasCompleteInfo &&
+      !hasSummarizedBefore
     ) {
-      return NextResponse.json({
-        reply: buildImageInfoConfirmationReply(finalCustomerInfo),
-        images: [],
-      });
-    }
-
-    if (
-      selectedProduct &&
-      finalOffer &&
-      urgencyIntent &&
-      !hasCompleteInfo
-    ) {
-      const missingLabels = missingFields.map((field) => {
-        if (field === "phone") return "เบอร์โทร";
-        if (field === "address") return "ที่อยู่";
-        if (field === "name") return "ชื่อ";
-        return field;
-      });
-
-      const missingText =
-        missingLabels.length === 1
-          ? missingLabels[0]
-          : missingLabels.join(" และ ");
-
-      return NextResponse.json({
-        reply: [
-          `${selectedProduct.name}`,
-          `รับเป็น ${finalOffer.title} ได้เลยค่ะ 🔥`,
-          finalOffer.price ? `ยอดเก็บปลายทาง ${finalOffer.price} บาท` : "",
-          finalOffer.note || "",
-          `ถ้าสะดวก รบกวนส่ง${missingText}มาได้เลยนะคะ เดี๋ยวน้องรีบสรุปออเดอร์ให้ทันทีค่ะ 😊`,
-        ]
-          .filter(Boolean)
-          .join("\n"),
-        images: [],
-      });
-    }
-
-    // 4) ถ้าลูกค้าเลือกโปรแล้ว และข้อมูลครบ -> สรุปออเดอร์จบทันที
-    if (selectedProduct && finalOffer && hasCompleteInfo) {
       const reply = buildOrderSummaryText({
         product: selectedProduct,
         offer: finalOffer,
@@ -2921,6 +2634,11 @@ export async function POST(req: Request) {
         product: selectedProduct,
         offer: finalOffer,
         customerInfo: finalCustomerInfo,
+        botName: chatbot?.name || "",
+        pageName:
+          (chatbot as any)?.connectionConfig?.facebookPageName ||
+          chatbot?.pageName ||
+          "",
       });
 
       try {
@@ -2936,22 +2654,19 @@ export async function POST(req: Request) {
 
       return NextResponse.json({
         reply,
-        images: sharedResponseImages,
+        images: [],
       });
     }
 
-    // 5) ถ้าลูกค้าเลือกโปรแล้ว แต่ข้อมูลยังไม่ครบ -> ถามเฉพาะที่ขาด
+    /**
+     * 6) เลือกโปรแล้ว แต่ข้อมูลไม่ครบ
+     */
     if (selectedProduct && finalOffer && !hasCompleteInfo) {
       if (
         hasBotRecentlyAskedForSameMissingFields(history, missingFields) &&
         !containsCustomerInfo(message) &&
         !editIntent.isEdit
       ) {
-        console.log("CHATBOT_RETURN_WAITING_INFO_DEBUG", {
-          message,
-          sharedResponseImages,
-        });
-
         return NextResponse.json({
           reply: "น้องรอข้อมูลที่ขาดอยู่นะคะ 😊",
           images: sharedResponseImages,
@@ -2964,18 +2679,15 @@ export async function POST(req: Request) {
         missingFields,
       });
 
-      console.log("CHATBOT_RETURN_NEED_MORE_INFO_DEBUG", {
-        replyPreview: reply?.slice(0, 120) || "",
-        sharedResponseImages,
-      });
-
       return NextResponse.json({
         reply,
         images: sharedResponseImages,
       });
     }
 
-    // 6) ถ้าพิมพ์คลุมเครือแต่เหมือนกำลังเลือกโปรหลายตัว -> ให้เลือกโปรก่อน
+    /**
+     * 7) ลูกค้าพิมพ์แบบเลือกโปร แต่ยังจับโปรสุดท้ายไม่ได้
+     */
     if (
       selectedProduct &&
       !finalOffer &&
@@ -2983,8 +2695,7 @@ export async function POST(req: Request) {
       explicitOfferSelection
     ) {
       const requestedQuantity = detectRequestedQuantity(message);
-      const requestedQuantityText =
-        requestedQuantity ? `${requestedQuantity}` : "";
+      const requestedQuantityText = requestedQuantity ? `${requestedQuantity}` : "";
 
       const reply = buildOfferSelectionReply({
         product: selectedProduct,
@@ -2993,84 +2704,19 @@ export async function POST(req: Request) {
         requestedQuantityText,
       });
 
-      console.log("CHATBOT_RETURN_SELECT_OFFER_DEBUG", {
-        replyPreview: reply?.slice(0, 120) || "",
-        sharedResponseImages,
-      });
-
       return NextResponse.json({
         reply,
         images: sharedResponseImages,
       });
     }
 
-    if (
-      selectedProduct &&
-      !finalOffer &&
-      hasCustomerData &&
-      quantityMatchedOffers.length > 1 &&
-      explicitOfferSelection
-    ) {
-      const requestedQuantity = detectRequestedQuantity(message);
-      const requestedQuantityText =
-        requestedQuantity ? `${requestedQuantity}` : "";
-
-      const reply = buildOfferSelectionReply({
-        product: selectedProduct,
-        offers: quantityMatchedOffers,
-        requestedQuantityText,
-      });
-
-      console.log("CHATBOT_RETURN_SELECT_QTY_OFFER_DEBUG", {
-        replyPreview: reply?.slice(0, 120) || "",
-        sharedResponseImages,
-      });
-
-      return NextResponse.json({
-        reply,
-        images: sharedResponseImages,
-      });
-    }
-
-    if (
-      selectedProduct &&
-      !finalOffer &&
-      hasCustomerData &&
-      quantityMatchedOffers.length === 0 &&
-      activeOffers.length > 1 &&
-      explicitOfferSelection
-    ) {
-      const reply = buildOfferSelectionReply({
-        product: selectedProduct,
-        offers: activeOffers,
-      });
-
-      console.log("CHATBOT_RETURN_SELECT_ACTIVE_OFFER_DEBUG", {
-        replyPreview: reply?.slice(0, 120) || "",
-        sharedResponseImages,
-      });
-
-      return NextResponse.json({
-        reply,
-        images: sharedResponseImages,
-      });
-    }
-
-    const hasPendingOrderContext =
-      Boolean(selectedProduct || selectedOfferFromConversation || finalOffer);
-
-    const firstCustomerMessage = isFirstCustomerMessage(history);
-
-    const shouldNotShowOffersAgain =
-      hasAnyCustomerInfo ||
-      conversationState === "awaiting_customer_info" ||
-      conversationState === "order_summarized" ||
-      explicitOfferSelection;
-
+    /**
+     * 8) first message แบบ AI promo
+     */
     if (
       selectedProduct &&
       firstCustomerMessage &&
-      salesStrategy.showOffersInFirstReply &&
+      effectiveSalesStrategy.showOffersInFirstReply &&
       offersForFirstReply.length > 0 &&
       !hasRecentlySentPromoBlock(history) &&
       !finalOffer &&
@@ -3078,21 +2724,19 @@ export async function POST(req: Request) {
       !hasCustomerData &&
       !hasBotAskedForCustomerInfo(history) &&
       !containsCustomerInfo(message) &&
-      (
-        broadPriceIntent ||
-        isInterestIntent(message)
-      )
+      (broadPriceIntent || isInterestIntent(safeMessage))
     ) {
-
       const promoContext = [
         `บทบาทบอท: ${effectiveBotRole || "คุณคือแอดมินขายของออนไลน์"}`,
-        `กฎการตอบ: ${effectiveBotRules || "ตอบเหมือนแอดมินขายจริง สุภาพ เป็นกันเอง ปิดการขายแบบธรรมชาติ"}`,
-        `น้ำเสียง: ${effectiveSalesStrategy.toneStyle || "สุภาพ เป็นกันเอง แบบคนขายจริง"}`,
+        `กฎการตอบ: ${effectiveBotRules ||
+        "ตอบเหมือนแอดมินขายจริง สุภาพ เป็นกันเอง ปิดการขายแบบธรรมชาติ"
+        }`,
+        `น้ำเสียง: ${effectiveSalesStrategy.toneStyle || "สุภาพ เป็นกันเอง แบบคนขายจริง"
+        }`,
         `สไตล์เปิดบทสนทนา: ใช้เป็นแนวทางภายในเท่านั้น อย่าพูดข้อความคำสั่งนี้ตรง ๆ กับลูกค้า`,
         effectiveSalesStrategy.openingStyle
           ? `แนวทางเปิดบทสนทนา (สรุปความแล้วเอาไปใช้ ไม่ต้องคัดลอก): ${effectiveSalesStrategy.openingStyle}`
           : "",
-
         `สไตล์ปิดท้าย: ใช้เป็นแนวทางภายในเท่านั้น อย่าพูดข้อความคำสั่งนี้ตรง ๆ กับลูกค้า`,
         effectiveSalesStrategy.closingQuestionStyle
           ? `แนวทางปิดท้าย (สรุปความแล้วเอาไปใช้ ไม่ต้องคัดลอก): ${effectiveSalesStrategy.closingQuestionStyle}`
@@ -3100,8 +2744,12 @@ export async function POST(req: Request) {
         `ลูกค้าพิมพ์ว่า: ${safeMessage}`,
         "",
         `สินค้า: ${selectedProduct.name}`,
-        selectedProduct.salesNote ? `ข้อความขายสั้น: ${selectedProduct.salesNote}` : "",
-        selectedProduct.description ? `รายละเอียด: ${selectedProduct.description}` : "",
+        selectedProduct.salesNote
+          ? `ข้อความขายสั้น: ${selectedProduct.salesNote}`
+          : "",
+        selectedProduct.description
+          ? `รายละเอียด: ${selectedProduct.description}`
+          : "",
         selectedProduct.highlights ? `จุดเด่น: ${selectedProduct.highlights}` : "",
         "",
         "โปรโมชั่นที่มี:",
@@ -3142,33 +2790,14 @@ export async function POST(req: Request) {
           salesStrategy: effectiveSalesStrategy,
         });
 
-      console.log("CHATBOT_IMAGE_SOURCE_DEBUG", {
-        message,
-        selectedProductName: selectedProduct?.name,
-        selectedProductImagesText: selectedProduct?.imagesText,
-        productImages,
-        offersForFirstReply: offersForFirstReply.map((offer) => ({
-          title: offer.title,
-          imagesText: offer.imagesText,
-        })),
-        firstReplyImages,
-      });
-
-      const firstImages = mergeUniqueImageUrls(
-        productImages,
-        firstReplyImages,
-        offerImages,
-        faqImages
-      );
-
       console.log("CHATBOT_IMAGE_FINAL_DEBUG", {
-        firstImages,
+        sharedResponseImages,
         replyPreview: reply?.slice?.(0, 120) || "",
       });
 
       return NextResponse.json({
         reply,
-        images: firstImages,
+        images: sharedResponseImages,
       });
     }
 
