@@ -2275,6 +2275,7 @@ export async function POST(req: Request) {
     const productImages = parseImageUrls(selectedProduct?.imagesText || "");
     const faqImages = parseImageUrls(selectedFaq?.imagesText || "");
 
+
     const selectedOfferForImages =
       activeOffers.length > 0
         ? findSelectedOfferFromConversation(history, message, activeOffers) ||
@@ -2406,31 +2407,31 @@ export async function POST(req: Request) {
     const activeOffersForImagePool = (selectedProduct?.offers || []).filter(
       (offer) => offer.isActive
     );
-    
+
     const selectedOfferForImagePool =
       findSelectedOfferFromConversation(history, message, activeOffersForImagePool) ||
       detectRequestedOffer(message, activeOffersForImagePool) ||
       activeOffersForImagePool[0] ||
       null;
-    
+
     const sharedProductImages = selectedProduct
       ? parseImageUrls(selectedProduct.imagesText || "")
       : [];
-    
+
     const sharedOfferImages = selectedOfferForImagePool
       ? parseImageUrls(selectedOfferForImagePool.imagesText || "")
       : [];
-    
+
     const sharedFaqImages = selectedFaq
       ? parseImageUrls(selectedFaq.imagesText || "")
       : [];
-    
+
     const sharedResponseImages = mergeUniqueImageUrls(
       sharedProductImages,
       sharedOfferImages,
       sharedFaqImages
     );
-    
+
     console.log("CHATBOT_SHARED_RESPONSE_IMAGES_DEBUG", {
       selectedProductName: selectedProduct?.name || "",
       sharedProductImages,
@@ -2805,7 +2806,7 @@ export async function POST(req: Request) {
 
       return NextResponse.json({
         reply,
-        images: faqImages.length > 0 ? faqImages : productImages,
+        images: sharedResponseImages,
       });
     }
 
@@ -2852,7 +2853,7 @@ export async function POST(req: Request) {
 
       return NextResponse.json({
         reply,
-        images: [],
+        images: sharedResponseImages,
       });
     }
 
@@ -2935,7 +2936,7 @@ export async function POST(req: Request) {
 
       return NextResponse.json({
         reply,
-        images: [],
+        images: sharedResponseImages,
       });
     }
 
@@ -2950,7 +2951,7 @@ export async function POST(req: Request) {
           message,
           sharedResponseImages,
         });
-      
+
         return NextResponse.json({
           reply: "น้องรอข้อมูลที่ขาดอยู่นะคะ 😊",
           images: sharedResponseImages,
@@ -2962,12 +2963,12 @@ export async function POST(req: Request) {
         offer: finalOffer,
         missingFields,
       });
-      
+
       console.log("CHATBOT_RETURN_NEED_MORE_INFO_DEBUG", {
         replyPreview: reply?.slice(0, 120) || "",
         sharedResponseImages,
       });
-      
+
       return NextResponse.json({
         reply,
         images: sharedResponseImages,
@@ -2996,7 +2997,7 @@ export async function POST(req: Request) {
         replyPreview: reply?.slice(0, 120) || "",
         sharedResponseImages,
       });
-      
+
       return NextResponse.json({
         reply,
         images: sharedResponseImages,
@@ -3024,7 +3025,7 @@ export async function POST(req: Request) {
         replyPreview: reply?.slice(0, 120) || "",
         sharedResponseImages,
       });
-      
+
       return NextResponse.json({
         reply,
         images: sharedResponseImages,
@@ -3048,7 +3049,7 @@ export async function POST(req: Request) {
         replyPreview: reply?.slice(0, 120) || "",
         sharedResponseImages,
       });
-      
+
       return NextResponse.json({
         reply,
         images: sharedResponseImages,
@@ -3215,41 +3216,17 @@ ${message}
         contents: prompt,
       });
 
-      const activeOffersForImages = (selectedProduct.offers || []).filter(
-        (offer) => offer.isActive
-      );
-      
-      const selectedOfferForImages =
-        findSelectedOfferFromConversation(history, message, activeOffersForImages) ||
-        detectRequestedOffer(message, activeOffersForImages) ||
-        activeOffersForImages[0] ||
-        null;
-      
-      const fallbackProductImages = parseImageUrls(selectedProduct.imagesText || "");
-      const fallbackOfferImages = selectedOfferForImages
-        ? parseImageUrls(selectedOfferForImages.imagesText || "")
-        : [];
-      const fallbackFaqImages = selectedFaq
-        ? parseImageUrls(selectedFaq.imagesText || "")
-        : [];
-      
-      const responseImages = mergeUniqueImageUrls(
-        fallbackProductImages,
-        fallbackOfferImages,
-        fallbackFaqImages
-      );
-      
+      const replyText = response.text || "ไม่มีคำตอบ";
+
       console.log("CHATBOT_SELECTED_PRODUCT_RESPONSE_DEBUG", {
         selectedProductName: selectedProduct.name,
-        fallbackProductImages,
-        fallbackOfferImages,
-        fallbackFaqImages,
-        responseImages,
+        sharedResponseImages,
+        replyPreview: replyText.slice(0, 120),
       });
-      
+
       return NextResponse.json({
-        reply: response.text || "ไม่มีคำตอบ",
-        images: responseImages,
+        reply: replyText,
+        images: sharedResponseImages,
       });
     }
 
