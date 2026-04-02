@@ -2331,6 +2331,11 @@ export async function POST(req: Request) {
       parseImageUrls(offer.imagesText || "")
     );
 
+    const firstTouchImages = mergeUniqueImageUrls(
+      productImages,
+      firstReplyImages
+    );
+
     const faqIntent = isFaqIntent(safeMessage) || selectedFaq !== null;
     const broadPriceIntent = isBroadPriceIntent(safeMessage);
     const explicitOfferSelection = isExplicitOfferSelection(safeMessage);
@@ -2383,45 +2388,6 @@ export async function POST(req: Request) {
 
     const missingFields = getMissingCustomerFields(finalCustomerInfo);
 
-    const activeOffersForImagePool = (selectedProduct?.offers || []).filter(
-      (offer) => offer.isActive
-    );
-
-    const selectedOfferForImagePool =
-      finalOffer ||
-      findSelectedOfferFromConversation(history, message, activeOffersForImagePool) ||
-      detectRequestedOffer(message, activeOffersForImagePool) ||
-      activeOffersForImagePool[0] ||
-      null;
-
-    const sharedProductImages = selectedProduct
-      ? parseImageUrls(selectedProduct.imagesText || "")
-      : [];
-
-    const sharedOfferImages = selectedOfferForImagePool
-      ? parseImageUrls(selectedOfferForImagePool.imagesText || "")
-      : [];
-
-    const sharedFaqImages = selectedFaq
-      ? parseImageUrls(selectedFaq.imagesText || "")
-      : [];
-
-    const sharedResponseImages = mergeUniqueImageUrls(
-      sharedProductImages,
-      firstReplyImages,
-      sharedOfferImages,
-      sharedFaqImages
-    );
-
-    console.log("CHATBOT_SHARED_RESPONSE_IMAGES_DEBUG", {
-      selectedProductName: selectedProduct?.name || "",
-      sharedProductImages,
-      firstReplyImages,
-      sharedOfferImages,
-      sharedFaqImages,
-      sharedResponseImages,
-    });
-
     const botAskedForInfo = hasBotAskedForCustomerInfo(history);
     const hasSavedImageInfoBefore = hasSavedImageInfoInHistory(history);
     const botAskedToConfirmImageInfo = hasBotAskedToConfirmImageInfo(history);
@@ -2460,20 +2426,20 @@ export async function POST(req: Request) {
         selectedProduct.name || "",
         selectedFaq.answer || "",
         effectiveSalesStrategy.closingQuestionStyle ||
-        "ถ้าต้องการ เดี๋ยวแนะนำต่อให้เหมาะกับหน้างานได้ค่ะ",
+          "ถ้าต้องการ เดี๋ยวแนะนำต่อให้เหมาะกับหน้างานได้ค่ะ",
       ]
         .filter(Boolean)
         .join("\n\n");
 
       return NextResponse.json({
         reply,
-        images: sharedResponseImages,
+        images: [],
       });
     }
 
     /**
-     * 2) ทักมาสนใจ / ขอราคา / ขอโปร ครั้งแรก -> ส่งข้อความ + รูปทันที
-     * อันนี้คือจุดที่ต้องให้ชนะ branch อื่น
+     * 2) ทักมาสนใจ / ขอราคา / ขอโปร ครั้งแรก -> ส่งข้อความ + รูป
+     * ส่งรูปเฉพาะทักแรกเท่านั้น
      */
     if (
       selectedProduct &&
@@ -2493,12 +2459,12 @@ export async function POST(req: Request) {
 
       console.log("CHATBOT_RETURN_FIRST_TOUCH_DEBUG", {
         replyPreview: reply?.slice(0, 120) || "",
-        sharedResponseImages,
+        firstTouchImages,
       });
 
       return NextResponse.json({
         reply,
-        images: sharedResponseImages,
+        images: firstTouchImages,
       });
     }
 
@@ -2520,7 +2486,7 @@ export async function POST(req: Request) {
 
       return NextResponse.json({
         reply,
-        images: sharedResponseImages,
+        images: [],
       });
     }
 
@@ -2555,7 +2521,7 @@ export async function POST(req: Request) {
             ? parsedImageData.name || ""
             : finalCustomerInfo.name || ""
           : finalCustomerInfo.name ||
-          (reliableImageName ? parsedImageData.name || "" : ""),
+            (reliableImageName ? parsedImageData.name || "" : ""),
         phone: finalCustomerInfo.phone || parsedImageData.phone || "",
         address: finalCustomerInfo.address || parsedImageData.address || "",
         facebookName: finalCustomerInfo.facebookName || senderName || "",
@@ -2669,7 +2635,7 @@ export async function POST(req: Request) {
       ) {
         return NextResponse.json({
           reply: "น้องรอข้อมูลที่ขาดอยู่นะคะ 😊",
-          images: sharedResponseImages,
+          images: [],
         });
       }
 
@@ -2681,7 +2647,7 @@ export async function POST(req: Request) {
 
       return NextResponse.json({
         reply,
-        images: sharedResponseImages,
+        images: [],
       });
     }
 
@@ -2706,12 +2672,13 @@ export async function POST(req: Request) {
 
       return NextResponse.json({
         reply,
-        images: sharedResponseImages,
+        images: [],
       });
     }
 
     /**
      * 8) first message แบบ AI promo
+     * ยังส่งรูปเฉพาะทักแรก
      */
     if (
       selectedProduct &&
@@ -2728,10 +2695,12 @@ export async function POST(req: Request) {
     ) {
       const promoContext = [
         `บทบาทบอท: ${effectiveBotRole || "คุณคือแอดมินขายของออนไลน์"}`,
-        `กฎการตอบ: ${effectiveBotRules ||
-        "ตอบเหมือนแอดมินขายจริง สุภาพ เป็นกันเอง ปิดการขายแบบธรรมชาติ"
+        `กฎการตอบ: ${
+          effectiveBotRules ||
+          "ตอบเหมือนแอดมินขายจริง สุภาพ เป็นกันเอง ปิดการขายแบบธรรมชาติ"
         }`,
-        `น้ำเสียง: ${effectiveSalesStrategy.toneStyle || "สุภาพ เป็นกันเอง แบบคนขายจริง"
+        `น้ำเสียง: ${
+          effectiveSalesStrategy.toneStyle || "สุภาพ เป็นกันเอง แบบคนขายจริง"
         }`,
         `สไตล์เปิดบทสนทนา: ใช้เป็นแนวทางภายในเท่านั้น อย่าพูดข้อความคำสั่งนี้ตรง ๆ กับลูกค้า`,
         effectiveSalesStrategy.openingStyle
@@ -2791,30 +2760,33 @@ export async function POST(req: Request) {
         });
 
       console.log("CHATBOT_IMAGE_FINAL_DEBUG", {
-        sharedResponseImages,
+        firstTouchImages,
         replyPreview: reply?.slice?.(0, 120) || "",
       });
 
       return NextResponse.json({
         reply,
-        images: sharedResponseImages,
+        images: firstTouchImages,
       });
     }
 
+    /**
+     * 9) fallback สินค้า -> ส่งข้อความอย่างเดียว
+     */
     if (selectedProduct) {
       const prompt = `
-    บทบาทของบอท:
-    ${effectiveBotRole || "คุณคือแอดมินฝ่ายขายของร้านค้าออนไลน์ ตอบสุภาพ เป็นกันเอง และช่วยปิดการขาย"}
-    
-    กฎการตอบ:
-    ${effectiveBotRules || "ห้ามเดา ถ้าไม่มีข้อมูลให้ตอบสุภาพและขอข้อมูลเฉพาะที่ขาด"}
-    
-    กลยุทธ์การขาย:
-    แนวเปิดบทสนทนา: ${effectiveSalesStrategy.openingStyle || "-"}
-    น้ำเสียง: ${effectiveSalesStrategy.toneStyle || "-"}
-    ให้โชว์หลายโปรในข้อความแรก: ${effectiveSalesStrategy.showOffersInFirstReply ? "ใช่" : "ไม่ใช่"}
-    จำนวนโปรสูงสุดในข้อความแรก: ${effectiveSalesStrategy.maxOffersInFirstReply || "2"}
-    แนวปิดท้าย: ${effectiveSalesStrategy.closingQuestionStyle || "-"}
+บทบาทของบอท:
+${effectiveBotRole || "คุณคือแอดมินฝ่ายขายของร้านค้าออนไลน์ ตอบสุภาพ เป็นกันเอง และช่วยปิดการขาย"}
+
+กฎการตอบ:
+${effectiveBotRules || "ห้ามเดา ถ้าไม่มีข้อมูลให้ตอบสุภาพและขอข้อมูลเฉพาะที่ขาด"}
+
+กลยุทธ์การขาย:
+แนวเปิดบทสนทนา: ${effectiveSalesStrategy.openingStyle || "-"}
+น้ำเสียง: ${effectiveSalesStrategy.toneStyle || "-"}
+ให้โชว์หลายโปรในข้อความแรก: ${effectiveSalesStrategy.showOffersInFirstReply ? "ใช่" : "ไม่ใช่"}
+จำนวนโปรสูงสุดในข้อความแรก: ${effectiveSalesStrategy.maxOffersInFirstReply || "2"}
+แนวปิดท้าย: ${effectiveSalesStrategy.closingQuestionStyle || "-"}
 
 บริบทแชทก่อนหน้า:
 ${historyToText(history) || "-"}
@@ -2849,39 +2821,15 @@ ${message}
 
       console.log("CHATBOT_SELECTED_PRODUCT_RESPONSE_DEBUG", {
         selectedProductName: selectedProduct.name,
-        sharedResponseImages,
         replyPreview: replyText.slice(0, 120),
       });
 
       return NextResponse.json({
         reply: replyText,
-        images: sharedResponseImages,
+        images: [],
       });
     }
-
-    const response = await ai.models.generateContent({
-      model: "gemini-2.5-flash",
-      contents: `
-บทบาทของบอท:
-${botRole || "คุณคือแอดมินฝ่ายขายของร้านค้าออนไลน์"}
-
-กฎการตอบ:
-${botRules || "ตอบสุภาพและไม่เดาข้อมูล"}
-
-ข้อความล่าสุดของลูกค้า:
-${message}
-`,
-    });
-
-    console.log("CHATBOT_EMPTY_IMAGE_FALLBACK_DEBUG", {
-      message,
-      hasSelectedProduct: Boolean(selectedProduct),
-    });
-
-    return NextResponse.json({
-      reply: response.text || "ไม่มีคำตอบ",
-      images: [],
-    });
+    
   } catch (error) {
     console.error("CHATBOT_ERROR:", error);
     return NextResponse.json(
