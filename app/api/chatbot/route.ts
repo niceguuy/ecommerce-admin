@@ -2010,16 +2010,17 @@ async function sendTelegramMessage(params: {
 function buildImageReadInstruction(): string {
   return [
     "ลูกค้าแนบรูปชื่อที่อยู่หรือข้อมูลจัดส่งมาในแชท",
-    "ให้อ่านเฉพาะข้อมูลที่มั่นใจเท่านั้น",
-    "ให้ดึงเฉพาะ: ชื่อผู้รับ, เบอร์โทร, ที่อยู่",
+    "ให้อ่านข้อมูลจากภาพให้มากที่สุดเท่าที่มั่นใจ",
+    "ข้อมูลที่ต้องพยายามหา: ชื่อผู้รับ, เบอร์โทร, ที่อยู่",
     "ห้ามเดาโปรสินค้า ห้ามเดาจำนวนสินค้า ห้ามเดาโปรโมชั่น",
-    "ถ้ารูปไม่ชัดหรือข้อมูลไม่ครบ ให้บอกตรง ๆ",
-    "ถ้ามีรหัสไปรษณีย์ให้อ่านด้วย",
-    "ตอบเป็นข้อความภายในระบบแบบนี้เท่านั้น:",
+    "ถ้าอ่านได้บางส่วนให้ตอบเท่าที่อ่านได้",
+    "ถ้าตัวเขียนไม่ชัดบางคำ ให้เก็บคำที่อ่านชัดไว้ก่อน",
+    "ถ้ามีบ้านเลขที่ หมู่ ตำบล อำเภอ จังหวัด หรือรหัสไปรษณีย์ ให้รวมไว้ในที่อยู่",
+    "ให้ตอบในรูปแบบนี้เท่านั้น:",
     "ชื่อ: ...",
     "เบอร์โทร: ...",
     "ที่อยู่: ...",
-    "สถานะ: ครบ / ไม่ครบ / อ่านไม่ชัด",
+    "สถานะ: ครบ / บางส่วน / อ่านไม่ชัด",
     "หมายเหตุ: ...",
   ].join("\n");
 }
@@ -2047,17 +2048,15 @@ function parseImageReadingResult(text: string): {
   unreadable: boolean;
   incomplete: boolean;
 } {
-  const normalized = (text || "").trim();
+  const normalized = normalizeWhitespace(text || "");
+  const raw = text || "";
 
   const unreadablePatterns = [
     "อ่านไม่ชัด",
-    "อ่านไม่ครบ",
     "รูปไม่ชัด",
-    "ข้อมูลไม่ครบ",
     "ไม่สามารถอ่าน",
     "มองไม่เห็น",
     "ไม่มั่นใจ",
-    "สถานะ: ไม่ครบ",
     "สถานะ: อ่านไม่ชัด",
   ];
 
@@ -2065,24 +2064,89 @@ function parseImageReadingResult(text: string): {
     normalized.includes(pattern)
   );
 
-  const phoneMatch = normalized.match(/(?:\+66|66|0)\d{8,9}/);
-  const phone = phoneMatch ? normalizePhone(phoneMatch[0]) : "";
-
   let name = "";
-  const nameMatch = normalized.match(/ชื่อ(?:ผู้รับ)?[:\s]+(.+)/);
-  if (nameMatch?.[1]) {
-    name = normalizeWhitespace(nameMatch[1].split("\n")[0].trim());
+  let phone = "";
+  let address = "";
+
+  const phoneMatch = raw.match(/(?:\+66|66|0)[\d\s-]{8,14}/);
+  if (phoneMatch?.[0]) {
+    phone = normalizePhone(phoneMatch[0]);
   }
 
-  let address = "";
-  const addressMatch = normalized.match(/ที่อยู่[:\s]+([\s\S]+)/);
-  if (addressMatch?.[1]) {
+  const explicitNameMatch = raw.match(/ชื่อ(?:ผู้รับ)?[:\s]+(.+)/);
+  if (explicitNameMatch?.[1]) {
+    name = normalizeWhitespace(explicitNameMatch[1].split("\n")[0].trim());
+  }
+
+  const explicitAddressMatch = raw.match(/ที่อยู่[:\s]+([\s\S]+)/);
+  if (explicitAddressMatch?.[1]) {
     address = normalizeWhitespace(
-      addressMatch[1]
+      explicitAddressMatch[1]
         .split("\nสถานะ")[0]
         .split("\nหมายเหตุ")[0]
         .trim()
     );
+  }
+
+  // fallback: ถ้า model ไม่ตอบตาม format เป๊ะ ให้พยายามแยกเองจากบรรทัด
+  if (!name || !address) {
+    const lines = raw
+      .split("\n")
+      .map((line) => normalizeWhitespace(line))
+      .filter(Boolean);
+
+    const cleanedLines = lines.map((line) =>
+      line
+        .replace(/^ชื่อ(?:ผู้รับ)?[:\s]*/i, "")
+        .replace(/^เบอร์โทร[:\s]*/i, "")
+        .replace(/^ที่อยู่[:\s]*/i, "")
+        .trim()
+    );
+
+    if (!name) {
+      const possibleName = cleanedLines.find((line) => {
+        if (!line) return false;
+        if (looksLikePhone(line)) return false;
+        if (looksLikeAddress(line)) return false;
+        if (/\d/.test(line)) return false;
+        return line.length >= 2;
+      });
+
+      if (possibleName) {
+        name = possibleName;
+      }
+    }
+
+    if (!address) {
+      const addressLines = cleanedLines.filter((line) => {
+        if (!line) return false;
+        if (line === name) return false;
+        if (looksLikePhone(line)) return false;
+        return (
+          looksLikeAddress(line) ||
+          /\b\d{1,4}(\/\d{1,4})?\b/.test(line) ||
+          /\b\d{5}\b/.test(line) ||
+          /(หมู่|ต\.|ตำบล|อ\.|อำเภอ|จ\.|จังหวัด|เขต|แขวง|กรุงเทพ|กทม|สระแก้ว|วัฒนานคร)/.test(line)
+        );
+      });
+
+      if (addressLines.length > 0) {
+        address = normalizeWhitespace(addressLines.join(" "));
+      }
+    }
+
+    if (!phone) {
+      const joined = cleanedLines.join(" ");
+      const fallbackPhoneMatch = joined.match(/(?:\+66|66|0)[\d\s-]{8,14}/);
+      if (fallbackPhoneMatch?.[0]) {
+        phone = normalizePhone(fallbackPhoneMatch[0]);
+      }
+    }
+  }
+
+  address = extractAddress(address || raw);
+  if (!name) {
+    name = extractName(raw);
   }
 
   const incomplete = !phone || !address;
@@ -2773,17 +2837,16 @@ export async function POST(req: Request) {
      */
     if (hasImageInput) {
       try {
+        const imageInstruction = buildImageReadInstruction();
         const imageParts = buildImageParts(images);
-
+    
         if (imageParts.length === 0) {
           return NextResponse.json({
             reply: "รูปที่ส่งมายังไม่สมบูรณ์ค่ะ ลองส่งใหม่อีกครั้งนะคะ 😊",
             images: [],
           });
         }
-
-        const imageInstruction = buildImageReadInstruction();
-
+    
         const imageReadResponse = await ai.models.generateContent({
           model: "gemini-2.5-flash",
           contents: [
@@ -2793,83 +2856,128 @@ export async function POST(req: Request) {
             },
           ],
         });
-
+    
         const imageReadText =
           imageReadResponse?.text?.trim() || "อ่านข้อมูลจากรูปไม่สำเร็จ";
-
+    
         console.log("CHATBOT_IMAGE_READ_RESULT", {
           imageReadText,
         });
-
+    
         const parsedImageData = parseImageReadingResult(imageReadText);
         const reliableImageName = isReliableImageName(parsedImageData.name || "");
-
-        const mergedCustomerInfo: ExtractedCustomerInfo = {
-          ...finalCustomerInfo,
-          name: shouldUseImageNameFirst(finalCustomerInfo.name)
-            ? reliableImageName
-              ? parsedImageData.name || ""
-              : finalCustomerInfo.name || ""
-            : finalCustomerInfo.name ||
-              (reliableImageName ? parsedImageData.name || "" : ""),
-          phone: finalCustomerInfo.phone || parsedImageData.phone || "",
-          address: mergeAddressParts(
-            finalCustomerInfo.address || "",
-            parsedImageData.address || ""
-          ),
-          facebookName: finalCustomerInfo.facebookName || senderName || "",
-        };
-
-        const missingFromImage = getMissingCustomerFields(mergedCustomerInfo);
-
-        if (parsedImageData.unreadable) {
+    
+        const mergedCustomerInfo: ExtractedCustomerInfo = buildSafeCustomerInfo({
+          editedCustomerInfo: {
+            ...finalCustomerInfo,
+            name: shouldUseImageNameFirst(finalCustomerInfo.name)
+              ? reliableImageName
+                ? parsedImageData.name || ""
+                : finalCustomerInfo.name || ""
+              : finalCustomerInfo.name ||
+                (reliableImageName ? parsedImageData.name || "" : ""),
+            phone: finalCustomerInfo.phone || parsedImageData.phone || "",
+            address: mergeAddressParts(
+              finalCustomerInfo.address || "",
+              parsedImageData.address || ""
+            ),
+            facebookName: finalCustomerInfo.facebookName || senderName || "",
+          },
+          senderName,
+          selectedProduct,
+        });
+    
+        const missingFromImage = getStrictMissingCustomerFields(mergedCustomerInfo);
+        const imageHasCompleteInfo = hasEnoughInfoForCodSummary(mergedCustomerInfo);
+    
+        if (
+          parsedImageData.unreadable &&
+          !parsedImageData.phone &&
+          !parsedImageData.address &&
+          !parsedImageData.name
+        ) {
           return NextResponse.json({
             reply:
-              "รูปที่ส่งมายังอ่านไม่ค่อยชัดค่ะ รบกวนพิมพ์ชื่อ เบอร์โทร หรือที่อยู่เพิ่มให้น้องอีกนิดนะคะ 😊",
+              "น้องอ่านรูปไม่สำเร็จในรอบนี้ค่ะ รบกวนพิมพ์ชื่อ เบอร์โทร และที่อยู่เพิ่มให้น้องได้เลยนะคะ 😊",
             images: [],
           });
         }
-
+    
+        // ถ้ายังไม่ได้เลือกโปร -> เก็บข้อมูลจากรูปไว้ก่อน แล้วรอให้ลูกค้าเลือกโปร
         if (!finalOffer) {
           return NextResponse.json({
             reply:
               missingFromImage.length === 0
                 ? buildImageInfoSavedReply(mergedCustomerInfo)
-                : buildImageInfoConfirmationReply(mergedCustomerInfo),
+                : buildImageConfirmationReplyStrict({
+                    customerInfo: mergedCustomerInfo,
+                    missingFields: missingFromImage,
+                  }),
             images: [],
           });
         }
-
-        if (missingFromImage.length > 0) {
-          const missingLabels = missingFromImage
-            .map((field) => {
-              if (field === "phone") return "เบอร์โทร";
-              if (field === "address") {
-                const addressMissing = getMissingThaiAddressParts(
-                  mergedCustomerInfo.address || ""
-                );
-                return addressMissing.length > 0
-                  ? `ที่อยู่ (${addressMissing.join(" / ")})`
-                  : "ที่อยู่";
-              }
-              if (field === "name") return "ชื่อผู้รับ";
-              return field;
-            })
-            .join(" และ ");
-
+    
+        // ถ้าเลือกโปรแล้ว + ข้อมูลครบ -> สรุป order ทันที
+        if (finalOffer && imageHasCompleteInfo && selectedProduct) {
+          const reply = buildOrderSummaryText({
+            product: selectedProduct,
+            offer: finalOffer,
+            customerInfo: mergedCustomerInfo,
+          });
+    
+          const orderId = buildOrderId({
+            product: selectedProduct,
+            customerInfo: mergedCustomerInfo,
+          });
+    
+          const telegramMessage = buildTelegramOrderMessage({
+            eventType: telegramEventType,
+            orderId,
+            product: selectedProduct,
+            offer: finalOffer,
+            customerInfo: mergedCustomerInfo,
+            botName: chatbot?.name || "",
+            pageName:
+              (chatbot as any)?.connectionConfig?.facebookPageName ||
+              chatbot?.pageName ||
+              "",
+          });
+    
+          try {
+            await sendTelegramMessage({
+              text: telegramMessage,
+              chatId: effectiveTelegramChatId,
+              botToken: effectiveTelegramBotToken,
+              threadId: effectiveTelegramThreadId,
+            });
+          } catch (error) {
+            console.error("Telegram error:", error);
+          }
+    
           return NextResponse.json({
-            reply: `น้องอ่านข้อมูลจากรูปได้บางส่วนค่ะ แต่ยังขาด${missingLabels} รบกวนพิมพ์เพิ่มให้น้องอีกนิดนะคะ 😊`,
+            reply,
             images: [],
           });
         }
-
+    
+        // ถ้ายังไม่ครบ -> บอกให้เติมเฉพาะส่วนที่ขาด
+        if (missingFromImage.length > 0) {
+          return NextResponse.json({
+            reply: buildImageConfirmationReplyStrict({
+              customerInfo: mergedCustomerInfo,
+              missingFields: missingFromImage,
+            }),
+            images: [],
+          });
+        }
+    
         return NextResponse.json({
           reply: buildImageInfoConfirmationReply(mergedCustomerInfo),
           images: [],
         });
       } catch (error) {
         console.error("CHATBOT_IMAGE_BLOCK_ERROR:", error);
-
+    
         return NextResponse.json({
           reply:
             "น้องอ่านรูปไม่สำเร็จในรอบนี้ค่ะ รบกวนพิมพ์ชื่อ เบอร์โทร และที่อยู่เพิ่มให้น้องได้เลยนะคะ 😊",
