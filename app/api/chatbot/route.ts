@@ -1406,8 +1406,8 @@ function hasCompleteCustomerInfo(
   const hasRealName = Boolean(realName && !isLowConfidenceName(realName));
   const hasFallbackFacebookName = Boolean(
     options?.allowFacebookName &&
-      facebookName &&
-      !isLowConfidenceName(facebookName)
+    facebookName &&
+    !isLowConfidenceName(facebookName)
   );
 
   const hasAnyUsableName = hasRealName || hasFallbackFacebookName;
@@ -1715,12 +1715,12 @@ function buildFirstTouchReply(params: {
 
   const offerLine = firstOffer
     ? [
-        firstOffer.title ? `${firstOffer.title}` : "",
-        firstOffer.price ? `ราคา ${firstOffer.price} บาท` : "",
-        firstOffer.note || "",
-      ]
-        .filter(Boolean)
-        .join(" ")
+      firstOffer.title ? `${firstOffer.title}` : "",
+      firstOffer.price ? `ราคา ${firstOffer.price} บาท` : "",
+      firstOffer.note || "",
+    ]
+      .filter(Boolean)
+      .join(" ")
     : "";
 
   return [
@@ -2088,7 +2088,6 @@ function parseImageReadingResult(text: string): {
     );
   }
 
-  // fallback: ถ้า model ไม่ตอบตาม format เป๊ะ ให้พยายามแยกเองจากบรรทัด
   if (!name || !address) {
     const lines = raw
       .split("\n")
@@ -2145,6 +2144,7 @@ function parseImageReadingResult(text: string): {
   }
 
   address = extractAddress(address || raw);
+
   if (!name) {
     name = extractName(raw);
   }
@@ -2903,7 +2903,6 @@ export async function POST(req: Request) {
           });
         }
     
-        // ถ้ายังไม่ได้เลือกโปร -> เก็บข้อมูลจากรูปไว้ก่อน แล้วรอให้ลูกค้าเลือกโปร
         if (!finalOffer) {
           return NextResponse.json({
             reply:
@@ -2917,7 +2916,6 @@ export async function POST(req: Request) {
           });
         }
     
-        // ถ้าเลือกโปรแล้ว + ข้อมูลครบ -> สรุป order ทันที
         if (finalOffer && imageHasCompleteInfo && selectedProduct) {
           const reply = buildOrderSummaryText({
             product: selectedProduct,
@@ -2960,7 +2958,6 @@ export async function POST(req: Request) {
           });
         }
     
-        // ถ้ายังไม่ครบ -> บอกให้เติมเฉพาะส่วนที่ขาด
         if (missingFromImage.length > 0) {
           return NextResponse.json({
             reply: buildImageConfirmationReplyStrict({
@@ -3060,40 +3057,42 @@ export async function POST(req: Request) {
      */
     if (selectedProduct && finalOffer && !hasCompleteInfo) {
       const messageLooksLikeNewCustomerData =
-      containsCustomerInfo(message) ||
-      /\d{9,10}/.test(safeMessage) ||
-      /(หมู่|ม\.|ต\.|ตำบล|อ\.|อำเภอ|จ\.|จังหวัด|ซอย|ถนน|บ้านเลขที่|เลขที่)/.test(safeMessage);
+        containsCustomerInfo(message) ||
+        looksLikeAddress(safeMessage) ||
+        /\b\d{5}\b/.test(safeMessage) ||
+        /\d{9,10}/.test(safeMessage) ||
+        /(หมู่|ม\.|ต\.|ตำบล|อ\.|อำเภอ|จ\.|จังหวัด|ซอย|ถนน|บ้านเลขที่|เลขที่|แขวง|เขต)/.test(safeMessage);
 
-    if (
-      hasBotRecentlyAskedForSameMissingFields(history, missingFields) &&
-      !messageLooksLikeNewCustomerData &&
-      !editIntent.isEdit
-    ) {
+      if (
+        hasBotRecentlyAskedForSameMissingFields(history, missingFields) &&
+        !messageLooksLikeNewCustomerData &&
+        !editIntent.isEdit
+      ) {
+        return NextResponse.json({
+          reply: "น้องรอข้อมูลที่ขาดอยู่นะคะ 😊",
+          images: [],
+        });
+      }
+
+      const addressMissingText = !isCompleteThaiDeliveryAddress(finalCustomerInfo.address || "")
+        ? buildNeedMoreAddressDetailText(finalCustomerInfo.address || "")
+        : "";
+
+      const reply = buildNeedMoreInfoReply({
+        product: selectedProduct,
+        offer: finalOffer,
+        missingFields,
+        customerInfo: finalCustomerInfo,
+      });
+
+      const enhancedReply = addressMissingText
+        ? `${reply}\n\nรบกวนส่งที่อยู่ให้ครบเป็น: ${addressMissingText}`
+        : reply;
+
       return NextResponse.json({
-        reply: "น้องรอข้อมูลที่ขาดอยู่นะคะ 😊",
+        reply: enhancedReply,
         images: [],
       });
-    }
-
-    const addressMissingText = !isCompleteThaiDeliveryAddress(finalCustomerInfo.address || "")
-    ? buildNeedMoreAddressDetailText(finalCustomerInfo.address || "")
-    : "";
-
-    const reply = buildNeedMoreInfoReply({
-      product: selectedProduct,
-      offer: finalOffer,
-      missingFields,
-      customerInfo: finalCustomerInfo,
-    });
-
-  const enhancedReply = addressMissingText
-    ? `${reply}\n\nรบกวนส่งที่อยู่ให้ครบเป็น: ${addressMissingText}`
-    : reply;
-
-  return NextResponse.json({
-    reply: enhancedReply,
-    images: [],
-  });
     }
 
     /**
