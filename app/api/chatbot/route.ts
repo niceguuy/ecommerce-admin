@@ -2050,6 +2050,106 @@ function parseImageReadingResult(text: string): {
   };
 }
 
+function normalizeThaiText(value: string): string {
+  return (value || "")
+    .toLowerCase()
+    .replace(/\s+/g, "")
+    .trim();
+}
+
+function looksLikeBadCustomerName(params: {
+  candidateName: string;
+  selectedProductName?: string;
+  senderName?: string;
+}): boolean {
+  const candidate = (params.candidateName || "").trim();
+  if (!candidate) return true;
+
+  const normalizedCandidate = normalizeThaiText(candidate);
+  const normalizedProductName = normalizeThaiText(params.selectedProductName || "");
+  const normalizedSenderName = normalizeThaiText(params.senderName || "");
+
+  if (normalizedProductName && normalizedCandidate === normalizedProductName) {
+    return true;
+  }
+
+  if (
+    normalizedProductName &&
+    normalizedCandidate.length >= 6 &&
+    normalizedProductName.includes(normalizedCandidate)
+  ) {
+    return true;
+  }
+
+  const bannedFragments = [
+    "สเปรย์",
+    "คราบ",
+    "สูตร",
+    "โปร",
+    "เซ็ต",
+    "ราคา",
+    "บาท",
+    "ส่งฟรี",
+    "เก็บเงินปลายทาง",
+    "ขวด",
+    "หัวฉีด",
+    "โปรโมชั่น",
+  ];
+
+  if (bannedFragments.some((word) => normalizedCandidate.includes(normalizeThaiText(word)))) {
+    return true;
+  }
+
+  if (/^\d+$/.test(candidate.replace(/\s+/g, ""))) {
+    return true;
+  }
+
+  if (candidate.length > 60) {
+    return true;
+  }
+
+  if (normalizedSenderName && normalizedCandidate === normalizedSenderName) {
+    return false;
+  }
+
+  return false;
+}
+
+function buildSafeCustomerInfo(params: {
+  editedCustomerInfo: ExtractedCustomerInfo;
+  senderName?: string;
+  selectedProduct?: ProductItem | null;
+}): ExtractedCustomerInfo {
+  const rawName = (params.editedCustomerInfo.name || "").trim();
+  const fallbackFacebookName = (params.senderName || "").trim();
+
+  const safeName = looksLikeBadCustomerName({
+    candidateName: rawName,
+    selectedProductName: params.selectedProduct?.name || "",
+    senderName: fallbackFacebookName,
+  })
+    ? ""
+    : rawName;
+
+  return {
+    ...params.editedCustomerInfo,
+    name: safeName,
+    phone: (params.editedCustomerInfo.phone || "").trim(),
+    address: (params.editedCustomerInfo.address || "").trim(),
+    facebookName:
+      fallbackFacebookName || (params.editedCustomerInfo.facebookName || "").trim(),
+  };
+}
+
+function hasEnoughInfoForCodSummary(customerInfo: ExtractedCustomerInfo): boolean {
+  const phone = (customerInfo.phone || "").trim();
+  const address = (customerInfo.address || "").trim();
+  const name = (customerInfo.name || "").trim();
+  const facebookName = (customerInfo.facebookName || "").trim();
+
+  return Boolean(phone && address && (name || facebookName));
+}
+
 export async function POST(req: Request) {
   try {
     const body = await req.json();
@@ -2354,13 +2454,11 @@ export async function POST(req: Request) {
       editIntent
     );
 
-    const finalCustomerInfo: ExtractedCustomerInfo = {
-      ...editedCustomerInfo,
-      name: editedCustomerInfo.name || "",
-      phone: editedCustomerInfo.phone || "",
-      address: editedCustomerInfo.address || "",
-      facebookName: senderName || editedCustomerInfo.facebookName || "",
-    };
+    const finalCustomerInfo: ExtractedCustomerInfo = buildSafeCustomerInfo({
+      editedCustomerInfo,
+      senderName,
+      selectedProduct,
+    });
 
     const hasCustomerData = Boolean(
       finalCustomerInfo.name ||
@@ -2370,11 +2468,13 @@ export async function POST(req: Request) {
 
     const hasAnyCustomerInfo = hasCustomerData;
 
-    const hasCompleteInfo = hasCompleteCustomerInfo(finalCustomerInfo, {
-      allowFacebookName: true,
-    });
+    const hasCompleteInfo = hasEnoughInfoForCodSummary(finalCustomerInfo);
 
-    const missingFields = getMissingCustomerFields(finalCustomerInfo);
+    const missingFields = [
+      ...(finalCustomerInfo.phone ? [] : ["phone"]),
+      ...(finalCustomerInfo.address ? [] : ["address"]),
+      ...((finalCustomerInfo.name || finalCustomerInfo.facebookName) ? [] : ["name"]),
+    ] as Array<"name" | "phone" | "address">;
 
     const botAskedForInfo = hasBotAskedForCustomerInfo(history);
     const hasSavedImageInfoBefore = hasSavedImageInfoInHistory(history);
@@ -2635,16 +2735,21 @@ export async function POST(req: Request) {
      * 6) เลือกโปรแล้ว แต่ข้อมูลไม่ครบ
      */
     if (selectedProduct && finalOffer && !hasCompleteInfo) {
-      if (
-        hasBotRecentlyAskedForSameMissingFields(history, missingFields) &&
-        !containsCustomerInfo(message) &&
-        !editIntent.isEdit
-      ) {
-        return NextResponse.json({
-          reply: "น้องรอข้อมูลที่ขาดอยู่นะคะ 😊",
-          images: [],
-        });
-      }
+      const messageLooksLikeNewCustomerData =
+      containsCustomerInfo(message) ||
+      /\d{9,10}/.test(safeMessage) ||
+      /(หมู่|ม\.|ต\.|ตำบล|อ\.|อำเภอ|จ\.|จังหวัด|ซอย|ถนน|บ้านเลขที่|เลขที่)/.test(safeMessage);
+
+    if (
+      hasBotRecentlyAskedForSameMissingFields(history, missingFields) &&
+      !messageLooksLikeNewCustomerData &&
+      !editIntent.isEdit
+    ) {
+      return NextResponse.json({
+        reply: "น้องรอข้อมูลที่ขาดอยู่นะคะ 😊",
+        images: [],
+      });
+    }
 
       const reply = buildNeedMoreInfoReply({
         product: selectedProduct,
