@@ -2263,10 +2263,6 @@ export async function POST(req: Request) {
       finalOffer = quantityMatchedOffers[0];
     }
 
-    if (!finalOffer && activeOffers.length === 1) {
-      finalOffer = activeOffers[0];
-    }
-
     const maxOffers = Math.max(
       1,
       Number.parseInt(effectiveSalesStrategy.maxOffersInFirstReply || "2", 10) || 2
@@ -2343,11 +2339,6 @@ export async function POST(req: Request) {
     const urgencyIntent = hasUrgencyIntent(safeMessage);
     const confirmationIntent = isConfirmationIntent(safeMessage);
     const conversationState = detectConversationState(messages);
-
-    if (!finalOffer && activeOffers.length === 1 && explicitOfferSelection) {
-      finalOffer = activeOffers[0];
-    }
-
     const customerInfoFromHistory = editIntent.isEdit
       ? extractCustomerInfoFromHistory(messages, "")
       : extractCustomerInfoFromHistory(messages, safeMessage);
@@ -2576,6 +2567,19 @@ export async function POST(req: Request) {
     }
 
     /**
+     * 4.5) ค่อยล็อกโปรอัตโนมัติหลังผ่านช่วง first touch แล้ว
+     * เพื่อไม่ให้ทักแรกโดนกินจนไม่ส่งรูป
+     */
+    if (!finalOffer && activeOffers.length === 1) {
+      finalOffer = activeOffers[0];
+    }
+
+    if (!finalOffer && activeOffers.length === 1 && explicitOfferSelection) {
+      finalOffer = activeOffers[0];
+    }
+
+
+    /**
      * 5) ถ้าเลือกโปรแล้ว และข้อมูลครบ -> สรุปออเดอร์
      */
     if (
@@ -2681,7 +2685,92 @@ export async function POST(req: Request) {
      * 8) first message แบบ AI promo
      * ยังส่งรูปเฉพาะทักแรก
      */
-    if (false && selectedProduct) {
+    if (
+      selectedProduct &&
+      firstCustomerMessage &&
+      effectiveSalesStrategy.showOffersInFirstReply &&
+      offersForFirstReply.length > 0 &&
+      !hasRecentlySentPromoBlock(history) &&
+      !finalOffer &&
+      !shouldNotShowOffersAgain &&
+      !hasCustomerData &&
+      !hasBotAskedForCustomerInfo(history) &&
+      !containsCustomerInfo(message) &&
+      (broadPriceIntent || isInterestIntent(safeMessage))
+    ) {
+      const promoContext = [
+        `บทบาทบอท: ${effectiveBotRole || "คุณคือแอดมินขายของออนไลน์"}`,
+        `กฎการตอบ: ${effectiveBotRules ||
+        "ตอบเหมือนแอดมินขายจริง สุภาพ เป็นกันเอง ปิดการขายแบบธรรมชาติ"
+        }`,
+        `น้ำเสียง: ${effectiveSalesStrategy.toneStyle || "สุภาพ เป็นกันเอง แบบคนขายจริง"
+        }`,
+        `สไตล์เปิดบทสนทนา: ใช้เป็นแนวทางภายในเท่านั้น อย่าพูดข้อความคำสั่งนี้ตรง ๆ กับลูกค้า`,
+        effectiveSalesStrategy.openingStyle
+          ? `แนวทางเปิดบทสนทนา (สรุปความแล้วเอาไปใช้ ไม่ต้องคัดลอก): ${effectiveSalesStrategy.openingStyle}`
+          : "",
+        `สไตล์ปิดท้าย: ใช้เป็นแนวทางภายในเท่านั้น อย่าพูดข้อความคำสั่งนี้ตรง ๆ กับลูกค้า`,
+        effectiveSalesStrategy.closingQuestionStyle
+          ? `แนวทางปิดท้าย (สรุปความแล้วเอาไปใช้ ไม่ต้องคัดลอก): ${effectiveSalesStrategy.closingQuestionStyle}`
+          : "",
+        `ลูกค้าพิมพ์ว่า: ${safeMessage}`,
+        "",
+        `สินค้า: ${selectedProduct.name}`,
+        selectedProduct.salesNote
+          ? `ข้อความขายสั้น: ${selectedProduct.salesNote}`
+          : "",
+        selectedProduct.description
+          ? `รายละเอียด: ${selectedProduct.description}`
+          : "",
+        selectedProduct.highlights ? `จุดเด่น: ${selectedProduct.highlights}` : "",
+        "",
+        "โปรโมชั่นที่มี:",
+        ...offersForFirstReply.map((offer, index) => {
+          return [
+            `โปร ${index + 1}`,
+            `ชื่อโปร: ${offer.title}`,
+            offer.price ? `ราคา: ${offer.price} บาท` : "",
+            offer.note ? `หมายเหตุ: ${offer.note}` : "",
+          ]
+            .filter(Boolean)
+            .join(" | ");
+        }),
+        "",
+        "คำสั่งสำคัญ:",
+        "- เขียนคำตอบให้เหมือนแอดมินขายของจริงในแชท",
+        "- ภาษาต้องลื่น อ่านแล้วเป็นคนตอบ ไม่ใช่ระบบ",
+        "- ใช้อีโมจิได้พอดี ๆ ให้ดูขายเก่ง แต่ไม่เยอะเกิน",
+        "- ชูจุดเด่นสินค้าแบบกระชับ",
+        `- สรุปจำนวนโปรตามข้อมูลที่มีจริง แต่ไม่เกิน ${maxOffers} โปร`,
+        "- ปิดท้ายด้วยคำถามชวนเลือกซื้อสั้น ๆ",
+        "- ห้ามตอบแข็ง ห้ามตอบเป็นภาษาระบบ",
+        "- ห้ามคัดลอกข้อความจากแนวเปิดบทสนทนา แนวปิดท้าย หรือกฎการตอบออกมาตรง ๆ",
+      ]
+        .filter(Boolean)
+        .join("\n");
+
+      const promoAiResponse = await ai.models.generateContent({
+        model: "gemini-2.5-flash",
+        contents: promoContext,
+      });
+
+      const reply =
+        promoAiResponse?.text?.trim() ||
+        buildPromoReply({
+          product: selectedProduct,
+          offers: offersForFirstReply,
+          salesStrategy: effectiveSalesStrategy,
+        });
+
+      console.log("CHATBOT_IMAGE_FINAL_DEBUG", {
+        firstTouchImages,
+        replyPreview: reply?.slice?.(0, 120) || "",
+      });
+
+      return NextResponse.json({
+        reply,
+        images: firstTouchImages,
+      });
     }
 
     /**
