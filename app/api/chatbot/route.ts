@@ -2331,10 +2331,8 @@ export async function POST(req: Request) {
       parseImageUrls(offer.imagesText || "")
     );
 
-    const firstTouchImages = mergeUniqueImageUrls(
-      productImages,
+    const firstTouchImages = fallbackReplyImages;
       firstReplyImages
-    );
 
     const faqIntent = isFaqIntent(safeMessage) || selectedFaq !== null;
     const broadPriceIntent = isBroadPriceIntent(safeMessage);
@@ -2443,6 +2441,7 @@ export async function POST(req: Request) {
      */
     if (
       selectedProduct &&
+      firstCustomerMessage &&
       !finalOffer &&
       effectiveSalesStrategy.showOffersInFirstReply &&
       offersForFirstReply.length > 0 &&
@@ -2829,7 +2828,7 @@ ${message}
         images: [],
       });
     }
-    
+
   } catch (error) {
     console.error("CHATBOT_ERROR:", error);
     return NextResponse.json(
