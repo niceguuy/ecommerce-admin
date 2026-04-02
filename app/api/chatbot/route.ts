@@ -1667,35 +1667,32 @@ function buildFirstTouchReply(params: {
   offers: ProductOffer[];
   salesStrategy: SalesStrategy;
 }): string {
-  const { product, offers, salesStrategy } = params;
+  const { product, offers } = params;
 
-  const openingLine =
-    salesStrategy.openingStyle?.trim() ||
-    `สวัสดีค่ะ น้องส่งรายละเอียด ${product.name} ให้ดูก่อนนะคะ 😊`;
+  const shortDescription =
+    normalizeWhitespace(product.salesNote || "") ||
+    normalizeWhitespace(product.description || "");
 
-  const highlightText = splitLines(product.highlights || "").join("\n");
-  const usageText = splitLines(product.usage || "").join("\n");
+  const firstOffer = offers[0] || null;
 
-  const offerLines = offers
-    .map((offer, index) => {
-      const pricePart = offer.price ? `${offer.price} บาท` : "-";
-      const notePart = offer.note ? ` (${offer.note})` : "";
-      return `โปร ${index + 1}: ${offer.title} ${pricePart}${notePart}`;
-    })
-    .join("\n");
+  const offerLine = firstOffer
+    ? [
+        firstOffer.title ? `${firstOffer.title}` : "",
+        firstOffer.price ? `ราคา ${firstOffer.price} บาท` : "",
+        firstOffer.note || "",
+      ]
+        .filter(Boolean)
+        .join(" ")
+    : "";
 
   return [
-    openingLine,
-    product.description ? `รายละเอียดสินค้า:\n${product.description}` : "",
-    highlightText ? `จุดเด่น:\n${highlightText}` : "",
-    usageText ? `วิธีใช้:\n${usageText}` : "",
-    product.salesNote ? `คำอธิบายเพิ่มเติม:\n${product.salesNote}` : "",
-    offers.length > 0 ? `โปรโมชั่นตอนนี้:\n${offerLines}` : "",
-    salesStrategy.closingQuestionStyle ||
-    "สนใจโปรไหน หรืออยากให้แนะโปรที่เหมาะกับการใช้งาน แจ้งน้องได้เลยนะคะ 💬",
+    `${product.name}`,
+    shortDescription,
+    offerLine,
+    "สนใจแบบไหน แจ้งได้เลยนะคะ 😊",
   ]
     .filter(Boolean)
-    .join("\n\n");
+    .join("\n");
 }
 
 function buildOfferSelectionAfterCustomerInfoReply(params: {
@@ -2449,14 +2446,19 @@ export async function POST(req: Request) {
         salesStrategy: effectiveSalesStrategy,
       });
 
+      const firstTouchReplyImages = mergeUniqueImageUrls(
+        productImages,
+        firstReplyImages
+      );
+
       console.log("CHATBOT_RETURN_FIRST_TOUCH_DEBUG", {
         replyPreview: reply?.slice(0, 120) || "",
-        firstTouchImages,
+        firstTouchReplyImages,
       });
 
       return NextResponse.json({
         reply,
-        images: firstTouchImages,
+        images: firstTouchReplyImages,
       });
     }
 
