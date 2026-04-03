@@ -675,13 +675,75 @@ function removeDetectedNameFromAddress(text: string, name: string): string {
   let value = normalizeWhitespace(text);
   const cleanName = normalizeWhitespace(name);
 
-  if (cleanName) {
-    const escaped = cleanName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    value = value.replace(new RegExp(`^${escaped}\\s*`, "i"), "");
-    value = value.replace(new RegExp(`\\b${escaped}\\b`, "i"), " ");
+  if (!cleanName) return value;
+
+  const escaped = cleanName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+  // 1) ชื่ออยู่ต้นข้อความ
+  value = value.replace(new RegExp(`^${escaped}(?=\\s|$)`, "i"), "");
+
+  // 2) ชื่ออยู่ท้ายข้อความ
+  value = value.replace(new RegExp(`(?<=\\s|^)${escaped}$`, "i"), "");
+
+  // 3) ชื่ออยู่กลางข้อความ คั่นด้วย space
+  value = value.replace(new RegExp(`(?<=\\s|^)${escaped}(?=\\s|$)`, "i"), " ");
+
+  value = value
+    .replace(/\s+/g, " ")
+    .trim();
+
+  return value;
+}
+
+function trimTrailingNameFromAddress(text: string): string {
+  const value = normalizeWhitespace(text || "");
+  if (!value) return "";
+
+  const parts = value.split(" ").filter(Boolean);
+  if (parts.length < 3) return value;
+
+  const addressKeywordPattern =
+    /^(หมู่|ม\.?|ซอย|ถนน|ต\.?|ตำบล|อ\.?|อำเภอ|จ\.?|จังหวัด|แขวง|เขต|บ้านเลขที่|เลขที่)$/i;
+
+  const provinceLikePattern =
+    /^(กรุงเทพ|กทม|กระบี่|กาญจนบุรี|กาฬสินธุ์|กำแพงเพชร|ขอนแก่น|จันทบุรี|ฉะเชิงเทรา|ชลบุรี|ชัยนาท|ชัยภูมิ|ชุมพร|เชียงราย|เชียงใหม่|ตรัง|ตราด|ตาก|นครนายก|นครปฐม|นครพนม|นครราชสีมา|นครศรีธรรมราช|นครสวรรค์|นนทบุรี|นราธิวาส|น่าน|บึงกาฬ|บุรีรัมย์|ปทุมธานี|ประจวบคีรีขันธ์|ปราจีนบุรี|ปัตตานี|พระนครศรีอยุธยา|พะเยา|พังงา|พัทลุง|พิจิตร|พิษณุโลก|เพชรบุรี|เพชรบูรณ์|แพร่|ภูเก็ต|มหาสารคาม|มุกดาหาร|แม่ฮ่องสอน|ยโสธร|ยะลา|ร้อยเอ็ด|ระนอง|ระยอง|ราชบุรี|ลพบุรี|ลำปาง|ลำพูน|เลย|ศรีสะเกษ|สกลนคร|สงขลา|สตูล|สมุทรปราการ|สมุทรสงคราม|สมุทรสาคร|สระแก้ว|สระบุรี|สิงห์บุรี|สุโขทัย|สุพรรณบุรี|สุราษฎร์ธานี|สุรินทร์|หนองคาย|หนองบัวลำภู|อ่างทอง|อุดรธานี|อุทัยธานี|อุตรดิตถ์|อุบลราชธานี|อำนาจเจริญ)$/;
+
+  const isAddressToken = (part: string): boolean => {
+    const p = normalizeWhitespace(part);
+    if (!p) return false;
+
+    return (
+      /\d/.test(p) ||
+      addressKeywordPattern.test(p) ||
+      provinceLikePattern.test(p) ||
+      /^(เมือง|วัฒนานคร|อรัญประเทศ|กบินทร์บุรี|บางนา|ลาดกระบัง|บางบัวทอง|ธัญบุรี)$/.test(p)
+    );
+  };
+
+  for (let tailSize = 3; tailSize >= 1; tailSize -= 1) {
+    if (parts.length <= tailSize) continue;
+
+    const head = parts.slice(0, -tailSize);
+    const tail = parts.slice(-tailSize);
+
+    const tailText = tail.join(" ");
+    const headText = head.join(" ");
+
+    const tailLooksLikeName =
+      looksLikeNameValue(tailText) &&
+      !looksLikeAddress(tailText) &&
+      !tail.some(isAddressToken);
+
+    const headStillLooksLikeAddress =
+      headText.length > 0 &&
+      looksLikeAddress(headText);
+
+    if (tailLooksLikeName && headStillLooksLikeAddress) {
+      return normalizeWhitespace(headText);
+    }
   }
 
-  return normalizeWhitespace(value);
+  return value;
 }
 
 function isLowConfidenceName(name: string): boolean {
@@ -804,9 +866,13 @@ function extractAddress(text: string): string {
 
   cleaned = removeCommonOrderWords(cleaned);
   cleaned = stripOfferNoise(cleaned);
-  cleaned = removeNamePrefixFromText(cleaned, safeDetectedName);
+  cleaned = removeDetectedNameFromAddress(cleaned, safeDetectedName);
   cleaned = removePhoneFromText(cleaned);
   cleaned = normalizeWhitespace(cleaned);
+  if (safeDetectedName) {
+    cleaned = removeDetectedNameFromAddress(cleaned, safeDetectedName);
+    cleaned = normalizeWhitespace(cleaned);
+  }
 
   const firstAddressIndex = cleaned.search(
     /(บ้านเลขที่|เลขที่|\b\d{1,4}(\/\d{1,4})?\b\s*(หมู่|ม\s*\d+|ม\.|ซอย|ถนน|ต\.|ตำบล|อ\.|อำเภอ|จ\.|จังหวัด|แขวง|เขต|อาคาร)?|หมู่|ม\s*\d+|ม\.|ซอย|ถนน|ต\.|ตำบล|อ\.|อำเภอ|จ\.|จังหวัด|แขวง|เขต|อาคาร|\b\d{5}\b|กรุงเทพ|กทม|วัฒนานคร|สระแก้ว)/i
@@ -827,6 +893,8 @@ function extractAddress(text: string): string {
     .replace(/(\d{5})/g, " $1")
     .replace(/\s+/g, " ")
     .trim();
+
+    cleaned = trimTrailingNameFromAddress(cleaned);
 
   if (looksLikeAddress(cleaned)) {
     return cleaned;
