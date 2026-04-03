@@ -1040,77 +1040,61 @@ function looksLikeNameValue(text: string): boolean {
 }
 
 function extractName(text: string): string {
-  const normalized = normalizeCustomerRawText(text);
-  const lines = splitLines(normalized);
-
-  const allCandidates = [
-    ...lines,
-    normalized,
-  ]
-    .map((line) => {
-      let value = normalizeWhitespace(line);
-
-      // ตัดเบอร์ออกก่อน
-      value = value.replace(/(?:\+66|66|0)\d{8,9}/g, " ");
-
-      // ถ้าบรรทัดเริ่มด้วย token ที่อยู่ตั้งแต่ต้น ให้ตัดทิ้งเลย ไม่ใช่ชื่อ
-      const addressIndex = value.search(
-        /(บ้านเลขที่|เลขที่|\b\d{1,4}\b\s*(หมู่|ม\s*\d+|ม\.|ซอย|ถนน|ต\.|ตำบล|อ\.|อำเภอ|จ\.|จังหวัด|แขวง|เขต|อาคาร)|หมู่|ม\s*\d+|ม\.|ซอย|ถนน|ต\.|ตำบล|อ\.|อำเภอ|จ\.|จังหวัด|แขวง|เขต|อาคาร|\b\d{5}\b|กรุงเทพ|กทม|วัฒนานคร|สระแก้ว)/i
-      );
-
-      if (addressIndex === 0) {
-        return "";
-      }
-
-      if (addressIndex > 0) {
-        value = value.slice(0, addressIndex);
-      }
-
-      value = removeCommonOrderWords(value);
-      value = stripOfferNoise(value);
-
-      value = value.replace(
-        /^(ชื่อใหม่|แก้ชื่อ|เปลี่ยนชื่อ|ชื่อผู้รับใหม่|ผู้รับใหม่|ชื่อผู้รับ|ชื่อ)\s*/i,
-        ""
-      );
-      value = value.replace(
-        /^(เบอร์ใหม่|เบอร์โทรใหม่|โทรใหม่|แก้เบอร์|เปลี่ยนเบอร์|เปลี่ยนเบอร์โทร|แก้เบอร์โทร|เบอร์|เบอร์โทร|โทร)\s*/i,
-        ""
-      );
-      value = value.replace(
-        /^(ที่อยู่ใหม่|แก้ที่อยู่|เปลี่ยนที่อยู่|ส่งที่นี่|ที่อยู่)\s*/i,
-        ""
-      );
-
-      value = value.replace(/[,:;|/\\]+/g, " ");
-      value = value.replace(/\b\d+\b/g, " ");
-      value = normalizeWhitespace(value);
-
-      // ถ้ายังหน้าตาเหมือนที่อยู่หรือไม่ใช่ชื่อจริง ให้ตัดทิ้ง
-      if (!looksLikeNameValue(value)) {
-        return "";
-      }
-
-      if (looksLikeAddress(value)) {
-        return "";
-      }
-
-      if (looksLikePhone(value)) {
-        return "";
-      }
-
-      return value;
-    })
-    .filter(Boolean);
+  const normalizedInput = normalizeCustomerRawText(text);
+  const lines = splitLines(normalizedInput);
 
   let bestName = "";
   let bestScore = 0;
 
-  for (const candidate of allCandidates) {
-    const score = scoreNameCandidate(candidate);
+  const tryCandidate = (raw: string, bonus = 0) => {
+    const cleaned = cleanPossibleNameLine(raw);
+    if (!looksLikeNameValue(cleaned)) return;
+
+    const score = scoreNameCandidate(cleaned) + bonus;
     if (score > bestScore) {
       bestScore = score;
-      bestName = candidate;
+      bestName = cleaned;
+    }
+  };
+
+  for (const line of lines) {
+    tryCandidate(line, 0);
+  }
+
+  const phone = extractPhone(normalizedInput);
+
+  if (phone) {
+    const phoneIndex = normalizedInput.indexOf(phone);
+
+    if (phoneIndex >= 0) {
+      const prefixCandidate = normalizedInput.slice(0, phoneIndex);
+      const suffixCandidate = normalizedInput.slice(phoneIndex + phone.length);
+
+      tryCandidate(prefixCandidate, 2);
+      tryCandidate(suffixCandidate, 2);
+    }
+  }
+
+  const address = extractAddress(normalizedInput);
+
+  if (address) {
+    const addressIndex = normalizedInput.indexOf(address);
+
+    if (addressIndex >= 0) {
+      const beforeAddress = normalizedInput.slice(0, addressIndex);
+      const afterAddress = normalizedInput.slice(addressIndex + address.length);
+
+      tryCandidate(beforeAddress, 1);
+      tryCandidate(afterAddress, 1);
+    }
+  }
+
+  const cleanedWholeText = cleanPossibleNameLine(normalizedInput);
+  if (looksLikeNameValue(cleanedWholeText)) {
+    const wholeScore = scoreNameCandidate(cleanedWholeText);
+    if (wholeScore > bestScore) {
+      bestScore = wholeScore;
+      bestName = cleanedWholeText;
     }
   }
 
@@ -1131,6 +1115,14 @@ function extractCustomerInfoFromText(text: string): ExtractedCustomerInfo {
   ) {
     name = "";
   }
+
+  console.log("TEXT_PARSE_DEBUG", {
+    originalText: text,
+    normalized,
+    name,
+    phone,
+    address,
+  });
 
   return {
     name,
@@ -2510,6 +2502,8 @@ function isCompleteThaiDeliveryAddress(text: string): boolean {
   const value = normalizeThaiAddressForCheck(text);
   if (!value) return false;
 
+  if (isStrongThaiAddress(value)) return true;
+
   const hasHouse = hasHouseNumberLike(value);
   const hasSubdistrict = hasThaiSubdistrict(value);
   const hasDistrict = hasThaiDistrict(value);
@@ -2566,8 +2560,7 @@ function getMissingAddressParts(text: string): string[] {
   if (!hasHouse) missing.push("บ้านเลขที่");
   if (!hasProvince) missing.push("จังหวัด");
 
-  // ถ้าไม่มีทั้งตำบล/อำเภอ/รหัสไปรษณีย์ ค่อยถือว่ายังขาด location detail
-  if (!hasSubdistrict && !hasDistrict && !hasZip) {
+  if (!hasDistrict && !hasSubdistrict && !hasZip) {
     missing.push("ตำบล/อำเภอ");
   }
 
