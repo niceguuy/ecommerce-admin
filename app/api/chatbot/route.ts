@@ -786,11 +786,19 @@ function extractAddress(text: string): string {
   const normalizedInput = cleanupThaiAddressNoise(normalizeCustomerRawText(text));
   const detectedName = extractName(normalizedInput);
 
+  const safeDetectedName =
+    detectedName &&
+    !looksLikeAddress(detectedName) &&
+    !looksLikePhone(detectedName) &&
+    looksLikeNameValue(detectedName)
+      ? detectedName
+      : "";
+
   let cleaned = normalizedInput;
 
   cleaned = removeCommonOrderWords(cleaned);
   cleaned = stripOfferNoise(cleaned);
-  cleaned = removeDetectedNameFromAddress(cleaned, detectedName);
+  cleaned = removeNamePrefixFromText(cleaned, safeDetectedName);
   cleaned = removePhoneFromText(cleaned);
 
   const firstAddressIndex = cleaned.search(
@@ -828,7 +836,7 @@ function extractAddress(text: string): string {
 
     candidate = removeCommonOrderWords(candidate);
     candidate = stripOfferNoise(candidate);
-    candidate = removeDetectedNameFromAddress(candidate, detectedName);
+    candidate = removeNamePrefixFromText(candidate, safeDetectedName);
     candidate = removePhoneFromText(candidate);
     candidate = cleanupThaiAddressNoise(candidate);
     candidate = normalizeWhitespace(candidate);
@@ -1018,10 +1026,14 @@ function extractName(text: string): string {
       // ตัดเบอร์ออกก่อน
       value = value.replace(/(?:\+66|66|0)\d{8,9}/g, " ");
 
-      // เอาแค่ส่วนก่อน address token
+      // ถ้าบรรทัดเริ่มด้วย token ที่อยู่ตั้งแต่ต้น ให้ตัดทิ้งเลย ไม่ใช่ชื่อ
       const addressIndex = value.search(
         /(บ้านเลขที่|เลขที่|\b\d{1,4}\b\s*(หมู่|ม\s*\d+|ม\.|ซอย|ถนน|ต\.|ตำบล|อ\.|อำเภอ|จ\.|จังหวัด|แขวง|เขต|อาคาร)|หมู่|ม\s*\d+|ม\.|ซอย|ถนน|ต\.|ตำบล|อ\.|อำเภอ|จ\.|จังหวัด|แขวง|เขต|อาคาร|\b\d{5}\b|กรุงเทพ|กทม|วัฒนานคร|สระแก้ว)/i
       );
+
+      if (addressIndex === 0) {
+        return "";
+      }
 
       if (addressIndex > 0) {
         value = value.slice(0, addressIndex);
@@ -1046,6 +1058,19 @@ function extractName(text: string): string {
       value = value.replace(/[,:;|/\\]+/g, " ");
       value = value.replace(/\b\d+\b/g, " ");
       value = normalizeWhitespace(value);
+
+      // ถ้ายังหน้าตาเหมือนที่อยู่หรือไม่ใช่ชื่อจริง ให้ตัดทิ้ง
+      if (!looksLikeNameValue(value)) {
+        return "";
+      }
+
+      if (looksLikeAddress(value)) {
+        return "";
+      }
+
+      if (looksLikePhone(value)) {
+        return "";
+      }
 
       return value;
     })
