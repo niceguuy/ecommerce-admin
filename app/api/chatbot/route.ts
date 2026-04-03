@@ -1412,7 +1412,7 @@ function hasCompleteCustomerInfo(
 
   const hasAnyUsableName = hasRealName || hasFallbackFacebookName;
   const hasValidPhone = Boolean(phone);
-  const hasStrongAddress = isStrongThaiAddress(address);
+  const hasStrongAddress = isCompleteThaiDeliveryAddress(address);
 
   return Boolean(hasAnyUsableName && hasValidPhone && hasStrongAddress);
 }
@@ -1431,7 +1431,7 @@ function getMissingCustomerFields(info: ExtractedCustomerInfo): string[] {
 
   if (!hasUsableName) missing.push("name");
   if (!phone) missing.push("phone");
-  if (!isStrongThaiAddress(address)) missing.push("address");
+  if (!isCompleteThaiDeliveryAddress(address)) missing.push("address");
 
   return missing;
 }
@@ -2060,10 +2060,6 @@ function parseImageReadingResult(text: string): {
     "สถานะ: อ่านไม่ชัด",
   ];
 
-  const unreadable = unreadablePatterns.some((pattern) =>
-    normalized.includes(pattern)
-  );
-
   let name = "";
   let phone = "";
   let address = "";
@@ -2088,59 +2084,74 @@ function parseImageReadingResult(text: string): {
     );
   }
 
-  if (!name || !address) {
-    const lines = raw
-      .split("\n")
-      .map((line) => normalizeWhitespace(line))
-      .filter(Boolean);
+  const lines = raw
+    .split("\n")
+    .map((line) => normalizeWhitespace(line))
+    .filter(Boolean);
 
-    const cleanedLines = lines.map((line) =>
-      line
-        .replace(/^ชื่อ(?:ผู้รับ)?[:\s]*/i, "")
-        .replace(/^เบอร์โทร[:\s]*/i, "")
-        .replace(/^ที่อยู่[:\s]*/i, "")
-        .trim()
-    );
+  const cleanedLines = lines.map((line) =>
+    line
+      .replace(/^ชื่อ(?:ผู้รับ)?[:\s]*/i, "")
+      .replace(/^เบอร์โทร[:\s]*/i, "")
+      .replace(/^ที่อยู่[:\s]*/i, "")
+      .replace(/^สถานะ[:\s]*/i, "")
+      .replace(/^หมายเหตุ[:\s]*/i, "")
+      .trim()
+  );
 
-    if (!name) {
-      const possibleName = cleanedLines.find((line) => {
-        if (!line) return false;
-        if (looksLikePhone(line)) return false;
-        if (looksLikeAddress(line)) return false;
-        if (/\d/.test(line)) return false;
-        return line.length >= 2;
-      });
+  if (!name) {
+    const possibleName = cleanedLines.find((line) => {
+      if (!line) return false;
+      if (looksLikePhone(line)) return false;
+      if (looksLikeAddress(line)) return false;
+      if (/\d/.test(line)) return false;
+      return line.length >= 2;
+    });
 
-      if (possibleName) {
-        name = possibleName;
-      }
+    if (possibleName) {
+      name = possibleName;
     }
+  }
 
-    if (!address) {
-      const addressLines = cleanedLines.filter((line) => {
-        if (!line) return false;
-        if (line === name) return false;
-        if (looksLikePhone(line)) return false;
-        return (
-          looksLikeAddress(line) ||
-          /\b\d{1,4}(\/\d{1,4})?\b/.test(line) ||
-          /\b\d{5}\b/.test(line) ||
-          /(หมู่|ต\.|ตำบล|อ\.|อำเภอ|จ\.|จังหวัด|เขต|แขวง|กรุงเทพ|กทม|สระแก้ว|วัฒนานคร)/.test(line)
-        );
-      });
+  if (!address) {
+    const addressLines = cleanedLines.filter((line) => {
+      if (!line) return false;
+      if (line === name) return false;
+      if (looksLikePhone(line)) return false;
 
-      if (addressLines.length > 0) {
-        address = normalizeWhitespace(addressLines.join(" "));
-      }
+      return (
+        looksLikeAddress(line) ||
+        /\b\d{1,4}(\/\d{1,4})?\b/.test(line) ||
+        /\b\d{5}\b/.test(line) ||
+        /(หมู่|ต\.|ตำบล|อ\.|อำเภอ|จ\.|จังหวัด|เขต|แขวง|กรุงเทพ|กทม|สระแก้ว|วัฒนานคร)/.test(line)
+      );
+    });
+
+    if (addressLines.length > 0) {
+      address = normalizeWhitespace(addressLines.join(" "));
     }
+  }
 
-    if (!phone) {
-      const joined = cleanedLines.join(" ");
-      const fallbackPhoneMatch = joined.match(/(?:\+66|66|0)[\d\s-]{8,14}/);
-      if (fallbackPhoneMatch?.[0]) {
-        phone = normalizePhone(fallbackPhoneMatch[0]);
-      }
+  if (!phone) {
+    const joined = cleanedLines.join(" ");
+    const fallbackPhoneMatch = joined.match(/(?:\+66|66|0)[\d\s-]{8,14}/);
+    if (fallbackPhoneMatch?.[0]) {
+      phone = normalizePhone(fallbackPhoneMatch[0]);
     }
+  }
+
+  const fallbackFromRaw = extractCustomerInfoFromText(raw);
+
+  if (!phone) {
+    phone = fallbackFromRaw.phone || "";
+  }
+
+  if (!address) {
+    address = fallbackFromRaw.address || "";
+  }
+
+  if (!name) {
+    name = fallbackFromRaw.name || "";
   }
 
   address = extractAddress(address || raw);
@@ -2148,6 +2159,11 @@ function parseImageReadingResult(text: string): {
   if (!name) {
     name = extractName(raw);
   }
+
+  const hasSomeReadableData = Boolean(name || phone || address);
+  const unreadable =
+    unreadablePatterns.some((pattern) => normalized.includes(pattern)) &&
+    !hasSomeReadableData;
 
   const incomplete = !phone || !address;
 
@@ -2255,128 +2271,127 @@ function normalizeThaiAddressForCheck(value: string): string {
   return normalizeWhitespace(normalizeCustomerRawText(value || ""));
 }
 
-function hasThaiProvince(text: string): boolean {
-  const value = normalizeThaiAddressForCheck(text);
+function extractThaiLocationWords(text: string): string[] {
+  return normalizeThaiAddressForCheck(text)
+    .split(" ")
+    .map((part) => part.trim())
+    .filter(
+      (part) =>
+        Boolean(part) &&
+        !/^\d+(\/\d+)?$/.test(part) &&
+        !/^0\d{9}$/.test(part) &&
+        !["ชื่อ", "เบอร์", "เบอร์โทร", "ที่อยู่", "หมู่", "ม", "ต", "อ", "จ"].includes(part)
+    );
+}
 
-  return /(กรุงเทพ|กทม|กระบี่|กาญจนบุรี|กาฬสินธุ์|กำแพงเพชร|ขอนแก่น|จันทบุรี|ฉะเชิงเทรา|ชลบุรี|ชัยนาท|ชัยภูมิ|ชุมพร|เชียงราย|เชียงใหม่|ตรัง|ตราด|ตาก|นครนายก|นครปฐม|นครพนม|นครราชสีมา|นครศรีธรรมราช|นครสวรรค์|นนทบุรี|นราธิวาส|น่าน|บึงกาฬ|บุรีรัมย์|ปทุมธานี|ประจวบคีรีขันธ์|ปราจีนบุรี|ปัตตานี|พระนครศรีอยุธยา|พะเยา|พังงา|พัทลุง|พิจิตร|พิษณุโลก|เพชรบุรี|เพชรบูรณ์|แพร่|ภูเก็ต|มหาสารคาม|มุกดาหาร|แม่ฮ่องสอน|ยโสธร|ยะลา|ร้อยเอ็ด|ระนอง|ระยอง|ราชบุรี|ลพบุรี|ลำปาง|ลำพูน|เลย|ศรีสะเกษ|สกลนคร|สงขลา|สตูล|สมุทรปราการ|สมุทรสงคราม|สมุทรสาคร|สระแก้ว|สระบุรี|สิงห์บุรี|สุโขทัย|สุพรรณบุรี|สุราษฎร์ธานี|สุรินทร์|หนองคาย|หนองบัวลำภู|อ่างทอง|อุดรธานี|อุทัยธานี|อุตรดิตถ์|อุบลราชธานี|อำนาจเจริญ)/.test(
-    value
+function hasThaiProvince(text: string): boolean {
+  return /(?:กรุงเทพ|กทม|กระบี่|กาญจนบุรี|กาฬสินธุ์|กำแพงเพชร|ขอนแก่น|จันทบุรี|ฉะเชิงเทรา|ชลบุรี|ชัยนาท|ชัยภูมิ|ชุมพร|เชียงราย|เชียงใหม่|ตรัง|ตราด|ตาก|นครนายก|นครปฐม|นครพนม|นครราชสีมา|นครศรีธรรมราช|นครสวรรค์|นนทบุรี|นราธิวาส|น่าน|บึงกาฬ|บุรีรัมย์|ปทุมธานี|ประจวบคีรีขันธ์|ปราจีนบุรี|ปัตตานี|พระนครศรีอยุธยา|พะเยา|พังงา|พัทลุง|พิจิตร|พิษณุโลก|เพชรบุรี|เพชรบูรณ์|แพร่|ภูเก็ต|มหาสารคาม|มุกดาหาร|แม่ฮ่องสอน|ยโสธร|ยะลา|ร้อยเอ็ด|ระนอง|ระยอง|ราชบุรี|ลพบุรี|ลำปาง|ลำพูน|เลย|ศรีสะเกษ|สกลนคร|สงขลา|สตูล|สมุทรปราการ|สมุทรสงคราม|สมุทรสาคร|สระแก้ว|สระบุรี|สิงห์บุรี|สุโขทัย|สุพรรณบุรี|สุราษฎร์ธานี|สุรินทร์|หนองคาย|หนองบัวลำภู|อ่างทอง|อุดรธานี|อุทัยธานี|อุตรดิตถ์|อุบลราชธานี|อำนาจเจริญ)/.test(
+    normalizeThaiAddressForCheck(text)
   );
 }
 
 function hasThaiDistrict(text: string): boolean {
-  const value = normalizeThaiAddressForCheck(text);
-
   return /(อำเภอ|อ\.|เขต|เมือง|วัฒนานคร|อรัญประเทศ|กบินทร์บุรี|บางนา|ลาดกระบัง|บางบัวทอง|ธัญบุรี)/.test(
-    value
+    normalizeThaiAddressForCheck(text)
   );
 }
 
 function hasThaiSubdistrict(text: string): boolean {
-  const value = normalizeThaiAddressForCheck(text);
-
   return /(ตำบล|ต\.|แขวง|วัฒนานคร|ห้วยโจด|ท่าเกษม|บ้านแก้ง|หนองน้ำใส|คลองหาด)/.test(
-    value
+    normalizeThaiAddressForCheck(text)
   );
 }
 
 function hasHouseNumberLike(text: string): boolean {
-  const value = normalizeThaiAddressForCheck(text);
+  return /\b\d{1,4}(\/\d{1,4})?\b/.test(normalizeThaiAddressForCheck(text));
+}
 
-  return /\b\d{1,4}(\/\d{1,4})?\b/.test(value);
+function hasAtLeastTwoThaiLocationWords(text: string): boolean {
+  return extractThaiLocationWords(text).length >= 2;
 }
 
 function isCompleteThaiDeliveryAddress(text: string): boolean {
-  const value = normalizeThaiAddressForCheck(text);
-  if (!value) return false;
+  const normalized = normalizeThaiAddressForCheck(text);
+  if (!normalized) return false;
 
-  const hasHouse = hasHouseNumberLike(value);
-  const hasSubdistrict = hasThaiSubdistrict(value);
-  const hasDistrict = hasThaiDistrict(value);
-  const hasProvince = hasThaiProvince(value);
+  const strong = isStrongThaiAddress(normalized);
+  if (strong) return true;
 
-  const bangkokStyle =
-    /(กรุงเทพ|กทม)/.test(value) &&
-    /(เขต)/.test(value) &&
-    /(แขวง)/.test(value) &&
-    hasHouse;
+  const hasHouse = hasHouseNumberLike(normalized);
+  const hasProvince = hasThaiProvince(normalized);
+  const hasDistrict = hasThaiDistrict(normalized);
+  const hasSubdistrict = hasThaiSubdistrict(normalized);
+  const hasZip = /\b\d{5}\b/.test(normalized);
+  const hasTwoLocationWords = hasAtLeastTwoThaiLocationWords(normalized);
 
-  const regionalStyle =
-    hasHouse &&
-    hasProvince &&
-    hasDistrict &&
-    hasSubdistrict;
+  if (hasHouse && hasProvince && hasDistrict && hasSubdistrict) {
+    return true;
+  }
 
-  return Boolean(bangkokStyle || regionalStyle);
+  if (hasHouse && hasProvince && hasDistrict && hasZip) {
+    return true;
+  }
+
+  if (hasHouse && hasProvince && hasTwoLocationWords) {
+    return true;
+  }
+
+  return false;
 }
 
 function getMissingAddressParts(text: string): string[] {
-  const value = normalizeThaiAddressForCheck(text);
-  if (!value) {
+  const normalized = normalizeThaiAddressForCheck(text);
+  if (!normalized) {
     return ["บ้านเลขที่", "ตำบล", "อำเภอ", "จังหวัด"];
   }
 
+  const hasHouse = hasHouseNumberLike(normalized);
+  const hasProvince = hasThaiProvince(normalized);
+  const hasDistrict = hasThaiDistrict(normalized);
+  const hasSubdistrict = hasThaiSubdistrict(normalized);
+  const hasTwoLocationWords = hasAtLeastTwoThaiLocationWords(normalized);
+
   const missing: string[] = [];
 
-  if (!hasHouseNumberLike(value)) missing.push("บ้านเลขที่");
-  if (!hasThaiSubdistrict(value)) missing.push("ตำบล");
-  if (!hasThaiDistrict(value)) missing.push("อำเภอ");
-  if (!hasThaiProvince(value)) missing.push("จังหวัด");
+  if (!hasHouse) {
+    missing.push("บ้านเลขที่");
+  }
 
-  return missing;
+  if (!hasProvince) {
+    missing.push("จังหวัด");
+  }
+
+  if (!hasDistrict && !hasTwoLocationWords) {
+    missing.push("อำเภอ");
+  }
+
+  if (!hasSubdistrict && !hasTwoLocationWords) {
+    missing.push("ตำบล");
+  }
+
+  return [...new Set(missing)];
 }
 
 function hasEnoughInfoForCodSummary(customerInfo: ExtractedCustomerInfo): boolean {
-  const phone = (customerInfo.phone || "").trim();
-  const address = (customerInfo.address || "").trim();
-  const name = (customerInfo.name || "").trim();
-  const facebookName = (customerInfo.facebookName || "").trim();
-
-  return Boolean(
-    phone &&
-    isCompleteThaiDeliveryAddress(address) &&
-    (name || facebookName)
-  );
+  return hasCompleteCustomerInfo(customerInfo, { allowFacebookName: true });
 }
 
 function getStrictMissingCustomerFields(
   customerInfo: ExtractedCustomerInfo
 ): Array<"name" | "phone" | "address"> {
-  const missing: Array<"name" | "phone" | "address"> = [];
-
-  if (!(customerInfo.name || customerInfo.facebookName)) {
-    missing.push("name");
-  }
-
-  if (!customerInfo.phone) {
-    missing.push("phone");
-  }
-
-  if (!isCompleteThaiDeliveryAddress(customerInfo.address || "")) {
-    missing.push("address");
-  }
-
-  return missing;
+  return getMissingCustomerFields(customerInfo) as Array<"name" | "phone" | "address">;
 }
 
 function buildNeedMoreAddressDetailText(address: string): string {
   const missingParts = getMissingAddressParts(address);
-
-  if (missingParts.length === 0) {
-    return "ที่อยู่";
-  }
-
-  return missingParts.join(" / ");
+  return missingParts.length > 0 ? missingParts.join(" / ") : "ที่อยู่";
 }
 
 function buildImageConfirmationReplyStrict(params: {
   customerInfo: ExtractedCustomerInfo;
   missingFields: Array<"name" | "phone" | "address">;
 }): string {
-  const displayName =
-    params.customerInfo.name ||
-    params.customerInfo.facebookName ||
-    "-";
-
+  const displayName = getDisplayCustomerName(params.customerInfo) || "-";
   const missingText = params.missingFields
     .map((field) => {
       if (field === "phone") return "เบอร์โทร";
@@ -2397,6 +2412,7 @@ function buildImageConfirmationReplyStrict(params: {
     missingText
       ? `ตอนนี้ยังขาด ${missingText}`
       : "ถ้าข้อมูลถูกต้อง พิมพ์ ยืนยัน ได้เลยนะคะ",
+    "ถ้ามีจุดไหนไม่ถูก พิมพ์แก้ชื่อ / แก้เบอร์ / แก้ที่อยู่ ส่งมาได้เลยนะคะ 😊",
   ]
     .filter(Boolean)
     .join("\n");
@@ -2720,9 +2736,13 @@ export async function POST(req: Request) {
 
     const hasAnyCustomerInfo = hasCustomerData;
 
-    const hasCompleteInfo = hasEnoughInfoForCodSummary(finalCustomerInfo);
+    const hasCompleteInfo = hasCompleteCustomerInfo(finalCustomerInfo, {
+      allowFacebookName: true,
+    });
 
-    const missingFields = getStrictMissingCustomerFields(finalCustomerInfo);
+    const missingFields = getMissingCustomerFields(finalCustomerInfo) as Array<
+      "name" | "phone" | "address"
+    >;
 
     const botAskedForInfo = hasBotAskedForCustomerInfo(history);
     const hasSavedImageInfoBefore = hasSavedImageInfoInHistory(history);
@@ -2887,8 +2907,15 @@ export async function POST(req: Request) {
           selectedProduct,
         });
     
-        const missingFromImage = getStrictMissingCustomerFields(mergedCustomerInfo);
-        const imageHasCompleteInfo = hasEnoughInfoForCodSummary(mergedCustomerInfo);
+        const imageOffer =
+          finalOffer || (activeOffers.length === 1 ? activeOffers[0] : null);
+
+        const missingFromImage = getMissingCustomerFields(
+          mergedCustomerInfo
+        ) as Array<"name" | "phone" | "address">;
+        const imageHasCompleteInfo = hasCompleteCustomerInfo(mergedCustomerInfo, {
+          allowFacebookName: true,
+        });
     
         if (
           parsedImageData.unreadable &&
@@ -2903,7 +2930,7 @@ export async function POST(req: Request) {
           });
         }
     
-        if (!finalOffer) {
+        if (!imageOffer) {
           return NextResponse.json({
             reply:
               missingFromImage.length === 0
@@ -2916,10 +2943,10 @@ export async function POST(req: Request) {
           });
         }
     
-        if (finalOffer && imageHasCompleteInfo && selectedProduct) {
+        if (imageOffer && imageHasCompleteInfo && selectedProduct) {
           const reply = buildOrderSummaryText({
             product: selectedProduct,
-            offer: finalOffer,
+            offer: imageOffer,
             customerInfo: mergedCustomerInfo,
           });
     
@@ -2932,7 +2959,7 @@ export async function POST(req: Request) {
             eventType: telegramEventType,
             orderId,
             product: selectedProduct,
-            offer: finalOffer,
+            offer: imageOffer,
             customerInfo: mergedCustomerInfo,
             botName: chatbot?.name || "",
             pageName:
@@ -3005,12 +3032,7 @@ export async function POST(req: Request) {
       hasCompleteInfo &&
       !hasSummarizedBefore
     ) {
-      if (!isCompleteThaiDeliveryAddress(finalCustomerInfo.address || "")) {
-        return NextResponse.json({
-          reply: `ยังขาดที่อยู่สำหรับจัดส่งค่ะ รบกวนส่งเพิ่มเป็น บ้านเลขที่ / ตำบล / อำเภอ / จังหวัด นะคะ 😊`,
-          images: [],
-        });
-      }
+
       const reply = buildOrderSummaryText({
         product: selectedProduct,
         offer: finalOffer,
@@ -3074,7 +3096,7 @@ export async function POST(req: Request) {
         });
       }
 
-      const addressMissingText = !isCompleteThaiDeliveryAddress(finalCustomerInfo.address || "")
+      const addressMissingText = missingFields.includes("address")
         ? buildNeedMoreAddressDetailText(finalCustomerInfo.address || "")
         : "";
 
@@ -3117,98 +3139,6 @@ export async function POST(req: Request) {
       return NextResponse.json({
         reply,
         images: [],
-      });
-    }
-
-    /**
-     * 8) first message แบบ AI promo
-     * ยังส่งรูปเฉพาะทักแรก
-     */
-    if (
-      selectedProduct &&
-      firstCustomerMessage &&
-      effectiveSalesStrategy.showOffersInFirstReply &&
-      offersForFirstReply.length > 0 &&
-      !hasRecentlySentPromoBlock(history) &&
-      !finalOffer &&
-      !shouldNotShowOffersAgain &&
-      !hasCustomerData &&
-      !hasBotAskedForCustomerInfo(history) &&
-      !containsCustomerInfo(message) &&
-      (broadPriceIntent || isInterestIntent(safeMessage))
-    ) {
-      const promoContext = [
-        `บทบาทบอท: ${effectiveBotRole || "คุณคือแอดมินขายของออนไลน์"}`,
-        `กฎการตอบ: ${effectiveBotRules ||
-        "ตอบเหมือนแอดมินขายจริง สุภาพ เป็นกันเอง ปิดการขายแบบธรรมชาติ"
-        }`,
-        `น้ำเสียง: ${effectiveSalesStrategy.toneStyle || "สุภาพ เป็นกันเอง แบบคนขายจริง"
-        }`,
-        `สไตล์เปิดบทสนทนา: ใช้เป็นแนวทางภายในเท่านั้น อย่าพูดข้อความคำสั่งนี้ตรง ๆ กับลูกค้า`,
-        effectiveSalesStrategy.openingStyle
-          ? `แนวทางเปิดบทสนทนา (สรุปความแล้วเอาไปใช้ ไม่ต้องคัดลอก): ${effectiveSalesStrategy.openingStyle}`
-          : "",
-        `สไตล์ปิดท้าย: ใช้เป็นแนวทางภายในเท่านั้น อย่าพูดข้อความคำสั่งนี้ตรง ๆ กับลูกค้า`,
-        effectiveSalesStrategy.closingQuestionStyle
-          ? `แนวทางปิดท้าย (สรุปความแล้วเอาไปใช้ ไม่ต้องคัดลอก): ${effectiveSalesStrategy.closingQuestionStyle}`
-          : "",
-        `ลูกค้าพิมพ์ว่า: ${safeMessage}`,
-        "",
-        `สินค้า: ${selectedProduct.name}`,
-        selectedProduct.salesNote
-          ? `ข้อความขายสั้น: ${selectedProduct.salesNote}`
-          : "",
-        selectedProduct.description
-          ? `รายละเอียด: ${selectedProduct.description}`
-          : "",
-        selectedProduct.highlights ? `จุดเด่น: ${selectedProduct.highlights}` : "",
-        "",
-        "โปรโมชั่นที่มี:",
-        ...offersForFirstReply.map((offer, index) => {
-          return [
-            `โปร ${index + 1}`,
-            `ชื่อโปร: ${offer.title}`,
-            offer.price ? `ราคา: ${offer.price} บาท` : "",
-            offer.note ? `หมายเหตุ: ${offer.note}` : "",
-          ]
-            .filter(Boolean)
-            .join(" | ");
-        }),
-        "",
-        "คำสั่งสำคัญ:",
-        "- เขียนคำตอบให้เหมือนแอดมินขายของจริงในแชท",
-        "- ภาษาต้องลื่น อ่านแล้วเป็นคนตอบ ไม่ใช่ระบบ",
-        "- ใช้อีโมจิได้พอดี ๆ ให้ดูขายเก่ง แต่ไม่เยอะเกิน",
-        "- ชูจุดเด่นสินค้าแบบกระชับ",
-        `- สรุปจำนวนโปรตามข้อมูลที่มีจริง แต่ไม่เกิน ${maxOffers} โปร`,
-        "- ปิดท้ายด้วยคำถามชวนเลือกซื้อสั้น ๆ",
-        "- ห้ามตอบแข็ง ห้ามตอบเป็นภาษาระบบ",
-        "- ห้ามคัดลอกข้อความจากแนวเปิดบทสนทนา แนวปิดท้าย หรือกฎการตอบออกมาตรง ๆ",
-      ]
-        .filter(Boolean)
-        .join("\n");
-
-      const promoAiResponse = await ai.models.generateContent({
-        model: "gemini-2.5-flash",
-        contents: promoContext,
-      });
-
-      const reply =
-        promoAiResponse?.text?.trim() ||
-        buildPromoReply({
-          product: selectedProduct,
-          offers: offersForFirstReply,
-          salesStrategy: effectiveSalesStrategy,
-        });
-
-      console.log("CHATBOT_IMAGE_FINAL_DEBUG", {
-        firstTouchImages,
-        replyPreview: reply?.slice?.(0, 120) || "",
-      });
-
-      return NextResponse.json({
-        reply,
-        images: firstTouchImages,
       });
     }
 
