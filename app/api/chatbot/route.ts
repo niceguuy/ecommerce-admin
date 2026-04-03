@@ -788,9 +788,9 @@ function extractAddress(text: string): string {
 
   const safeDetectedName =
     detectedName &&
-    !looksLikeAddress(detectedName) &&
-    !looksLikePhone(detectedName) &&
-    looksLikeNameValue(detectedName)
+      !looksLikeAddress(detectedName) &&
+      !looksLikePhone(detectedName) &&
+      looksLikeNameValue(detectedName)
       ? detectedName
       : "";
 
@@ -1113,6 +1113,56 @@ function extractCustomerInfoFromText(text: string): ExtractedCustomerInfo {
   };
 }
 
+async function extractCustomerInfoWithAiFallback(text: string): Promise<ExtractedCustomerInfo> {
+  const ruleBased = extractCustomerInfoFromText(text);
+
+  if (
+    (ruleBased.name && ruleBased.phone && ruleBased.address) ||
+    text.trim().length < 6
+  ) {
+    return ruleBased;
+  }
+
+  try {
+    const prompt = `
+แยกข้อมูลลูกค้าจากข้อความไทยนี้ให้ออกเป็น JSON เท่านั้น:
+{
+  "name": "",
+  "phone": "",
+  "address": ""
+}
+
+กติกา:
+- phone ต้องเป็นเบอร์ไทย 10 หลักถ้ามี
+- address ให้รวมบ้านเลขที่ หมู่ ตำบล อำเภอ จังหวัด รหัสไปรษณีย์เท่าที่หาได้
+- ถ้าไม่แน่ใจให้เว้นค่าว่าง
+- ห้ามตอบอย่างอื่นนอกจาก JSON
+
+ข้อความ:
+${text}
+`;
+
+    const response = await ai.models.generateContent({
+      model: "gemini-2.0-flash",
+      contents: prompt,
+    });
+
+    const raw = response.text || "";
+    const cleaned = raw.replace(/```json|```/g, "").trim();
+    const parsed = JSON.parse(cleaned);
+
+    return {
+      name: normalizeWhitespace(parsed.name || ruleBased.name || ""),
+      phone: normalizePhone(parsed.phone || ruleBased.phone || ""),
+      address: normalizeWhitespace(parsed.address || ruleBased.address || ""),
+      facebookName: "",
+    };
+  } catch (error) {
+    console.error("AI_CUSTOMER_PARSE_FAILED", error);
+    return ruleBased;
+  }
+}
+
 function detectConversationState(messages: Array<{ role: string; text: string }>): ConversationState {
   const joined = messages
     .map((item) => `${item.role}:${item.text}`)
@@ -1272,26 +1322,40 @@ function mergeCustomerInfo(
   };
 }
 
-function extractCustomerInfoFromHistory(
+async function extractCustomerInfoFromHistory(
   messages: Array<{ role: string; text: string }>,
   latestMessage: string
-): ExtractedCustomerInfo {
+): Promise<ExtractedCustomerInfo> {
   let customerInfo: ExtractedCustomerInfo = {
     name: "",
     phone: "",
     address: "",
     facebookName: "",
-  }
+  };
 
   for (const msg of messages) {
     if (msg.role !== "user") continue;
 
-    const extracted = extractCustomerInfoFromText(msg.text);
+    const extracted = await extractCustomerInfoWithAiFallback(msg.text);
+
+    console.log("DEBUG_HISTORY_ITEM_PARSE", {
+      sourceText: msg.text,
+      extracted,
+    });
+
     customerInfo = mergeCustomerInfo(customerInfo, extracted);
   }
 
   const latestExtracted = extractCustomerInfoFromText(latestMessage);
+
+  console.log("DEBUG_LATEST_MESSAGE_PARSE", {
+    latestMessage,
+    latestExtracted,
+  });
+
   customerInfo = mergeCustomerInfo(customerInfo, latestExtracted);
+
+  console.log("DEBUG_MERGED_CUSTOMER_INFO", customerInfo);
 
   return customerInfo;
 }
@@ -1437,9 +1501,21 @@ function hasCompleteCustomerInfo(
 
   const hasAnyUsableName = hasRealName || hasFallbackFacebookName;
   const hasValidPhone = Boolean(phone);
-  const hasStrongAddress = isStrongThaiAddress(address);
 
-  return Boolean(hasAnyUsableName && hasValidPhone && hasStrongAddress);
+  // ✅ ยืดหยุ่นขึ้น: strong ผ่านเลย
+  if (hasAnyUsableName && hasValidPhone && isStrongThaiAddress(address)) {
+    return true;
+  }
+
+  // ✅ fallback: ถ้ามีบ้านเลขที่ + จังหวัด + อำเภอ/เขต ก็ถือว่าใช้สรุป COD ได้แล้ว
+  const value = normalizeWhitespace(normalizeCustomerRawText(address));
+  const hasHouseNumber = /\b\d{1,4}(\/\d{1,4})?\b/.test(value);
+  const hasProvince =
+    /(กรุงเทพ|กทม|กระบี่|กาญจนบุรี|กาฬสินธุ์|กำแพงเพชร|ขอนแก่น|จันทบุรี|ฉะเชิงเทรา|ชลบุรี|ชัยนาท|ชัยภูมิ|ชุมพร|เชียงราย|เชียงใหม่|ตรัง|ตราด|ตาก|นครนายก|นครปฐม|นครพนม|นครราชสีมา|นครศรีธรรมราช|นครสวรรค์|นนทบุรี|นราธิวาส|น่าน|บึงกาฬ|บุรีรัมย์|ปทุมธานี|ประจวบคีรีขันธ์|ปราจีนบุรี|ปัตตานี|พระนครศรีอยุธยา|พะเยา|พังงา|พัทลุง|พิจิตร|พิษณุโลก|เพชรบุรี|เพชรบูรณ์|แพร่|ภูเก็ต|มหาสารคาม|มุกดาหาร|แม่ฮ่องสอน|ยโสธร|ยะลา|ร้อยเอ็ด|ระนอง|ระยอง|ราชบุรี|ลพบุรี|ลำปาง|ลำพูน|เลย|ศรีสะเกษ|สกลนคร|สงขลา|สตูล|สมุทรปราการ|สมุทรสงคราม|สมุทรสาคร|สระแก้ว|สระบุรี|สิงห์บุรี|สุโขทัย|สุพรรณบุรี|สุราษฎร์ธานี|สุรินทร์|หนองคาย|หนองบัวลำภู|อ่างทอง|อุดรธานี|อุทัยธานี|อุตรดิตถ์|อุบลราชธานี|อำนาจเจริญ)/.test(value);
+  const hasDistrict =
+    /(อำเภอ|อ\.|เขต|เมือง|วัฒนานคร|อรัญประเทศ|กบินทร์บุรี|บางนา|ลาดกระบัง|บางบัวทอง|ธัญบุรี)/.test(value);
+
+  return Boolean(hasAnyUsableName && hasValidPhone && hasHouseNumber && hasProvince && hasDistrict);
 }
 
 function getMissingCustomerFields(info: ExtractedCustomerInfo): string[] {
@@ -1456,9 +1532,27 @@ function getMissingCustomerFields(info: ExtractedCustomerInfo): string[] {
 
   if (!hasUsableName) missing.push("name");
   if (!phone) missing.push("phone");
-  if (!isStrongThaiAddress(address)) missing.push("address");
 
-  return missing;
+  // ✅ ใช้ logic เดียวกับ summary
+  if (
+    !hasCompleteCustomerInfo(
+      { ...info, phone, address, name: realName, facebookName },
+      { allowFacebookName: true }
+    )
+  ) {
+    const value = normalizeWhitespace(normalizeCustomerRawText(address));
+    const hasHouseNumber = /\b\d{1,4}(\/\d{1,4})?\b/.test(value);
+    const hasProvince =
+      /(กรุงเทพ|กทม|กระบี่|กาญจนบุรี|กาฬสินธุ์|กำแพงเพชร|ขอนแก่น|จันทบุรี|ฉะเชิงเทรา|ชลบุรี|ชัยนาท|ชัยภูมิ|ชุมพร|เชียงราย|เชียงใหม่|ตรัง|ตราด|ตาก|นครนายก|นครปฐม|นครพนม|นครราชสีมา|นครศรีธรรมราช|นครสวรรค์|นนทบุรี|นราธิวาส|น่าน|บึงกาฬ|บุรีรัมย์|ปทุมธานี|ประจวบคีรีขันธ์|ปราจีนบุรี|ปัตตานี|พระนครศรีอยุธยา|พะเยา|พังงา|พัทลุง|พิจิตร|พิษณุโลก|เพชรบุรี|เพชรบูรณ์|แพร่|ภูเก็ต|มหาสารคาม|มุกดาหาร|แม่ฮ่องสอน|ยโสธร|ยะลา|ร้อยเอ็ด|ระนอง|ระยอง|ราชบุรี|ลพบุรี|ลำปาง|ลำพูน|เลย|ศรีสะเกษ|สกลนคร|สงขลา|สตูล|สมุทรปราการ|สมุทรสงคราม|สมุทรสาคร|สระแก้ว|สระบุรี|สิงห์บุรี|สุโขทัย|สุพรรณบุรี|สุราษฎร์ธานี|สุรินทร์|หนองคาย|หนองบัวลำภู|อ่างทอง|อุดรธานี|อุทัยธานี|อุตรดิตถ์|อุบลราชธานี|อำนาจเจริญ)/.test(value);
+    const hasDistrict =
+      /(อำเภอ|อ\.|เขต|เมือง|วัฒนานคร|อรัญประเทศ|กบินทร์บุรี|บางนา|ลาดกระบัง|บางบัวทอง|ธัญบุรี)/.test(value);
+
+    if (!(hasHouseNumber && hasProvince && hasDistrict)) {
+      missing.push("address");
+    }
+  }
+
+  return [...new Set(missing)];
 }
 
 function stripEditPrefixByType(
@@ -2714,8 +2808,8 @@ export async function POST(req: Request) {
     const confirmationIntent = isConfirmationIntent(safeMessage);
     const conversationState = detectConversationState(messages);
     const customerInfoFromHistory = editIntent.isEdit
-      ? extractCustomerInfoFromHistory(messages, "")
-      : extractCustomerInfoFromHistory(messages, safeMessage);
+      ? await extractCustomerInfoFromHistory(messages, "")
+      : await extractCustomerInfoFromHistory(messages, safeMessage);
 
     const customerInfoFromBotImageConfirmation =
       extractCustomerInfoFromBotImageConfirmation(history);
@@ -2864,14 +2958,14 @@ export async function POST(req: Request) {
       try {
         const imageInstruction = buildImageReadInstruction();
         const imageParts = buildImageParts(images);
-    
+
         if (imageParts.length === 0) {
           return NextResponse.json({
             reply: "รูปที่ส่งมายังไม่สมบูรณ์ค่ะ ลองส่งใหม่อีกครั้งนะคะ 😊",
             images: [],
           });
         }
-    
+
         const imageReadResponse = await ai.models.generateContent({
           model: "gemini-2.5-flash",
           contents: [
@@ -2881,17 +2975,17 @@ export async function POST(req: Request) {
             },
           ],
         });
-    
+
         const imageReadText =
           imageReadResponse?.text?.trim() || "อ่านข้อมูลจากรูปไม่สำเร็จ";
-    
+
         console.log("CHATBOT_IMAGE_READ_RESULT", {
           imageReadText,
         });
-    
+
         const parsedImageData = parseImageReadingResult(imageReadText);
         const reliableImageName = isReliableImageName(parsedImageData.name || "");
-    
+
         const mergedCustomerInfo: ExtractedCustomerInfo = buildSafeCustomerInfo({
           editedCustomerInfo: {
             ...finalCustomerInfo,
@@ -2900,7 +2994,7 @@ export async function POST(req: Request) {
                 ? parsedImageData.name || ""
                 : finalCustomerInfo.name || ""
               : finalCustomerInfo.name ||
-                (reliableImageName ? parsedImageData.name || "" : ""),
+              (reliableImageName ? parsedImageData.name || "" : ""),
             phone: finalCustomerInfo.phone || parsedImageData.phone || "",
             address: mergeAddressParts(
               finalCustomerInfo.address || "",
@@ -2911,10 +3005,10 @@ export async function POST(req: Request) {
           senderName,
           selectedProduct,
         });
-    
+
         const missingFromImage = getStrictMissingCustomerFields(mergedCustomerInfo);
         const imageHasCompleteInfo = hasEnoughInfoForCodSummary(mergedCustomerInfo);
-    
+
         if (
           parsedImageData.unreadable &&
           !parsedImageData.phone &&
@@ -2927,32 +3021,32 @@ export async function POST(req: Request) {
             images: [],
           });
         }
-    
+
         if (!finalOffer) {
           return NextResponse.json({
             reply:
               missingFromImage.length === 0
                 ? buildImageInfoSavedReply(mergedCustomerInfo)
                 : buildImageConfirmationReplyStrict({
-                    customerInfo: mergedCustomerInfo,
-                    missingFields: missingFromImage,
-                  }),
+                  customerInfo: mergedCustomerInfo,
+                  missingFields: missingFromImage,
+                }),
             images: [],
           });
         }
-    
+
         if (finalOffer && imageHasCompleteInfo && selectedProduct) {
           const reply = buildOrderSummaryText({
             product: selectedProduct,
             offer: finalOffer,
             customerInfo: mergedCustomerInfo,
           });
-    
+
           const orderId = buildOrderId({
             product: selectedProduct,
             customerInfo: mergedCustomerInfo,
           });
-    
+
           const telegramMessage = buildTelegramOrderMessage({
             eventType: telegramEventType,
             orderId,
@@ -2965,7 +3059,7 @@ export async function POST(req: Request) {
               chatbot?.pageName ||
               "",
           });
-    
+
           try {
             await sendTelegramMessage({
               text: telegramMessage,
@@ -2976,13 +3070,13 @@ export async function POST(req: Request) {
           } catch (error) {
             console.error("Telegram error:", error);
           }
-    
+
           return NextResponse.json({
             reply,
             images: [],
           });
         }
-    
+
         if (missingFromImage.length > 0) {
           return NextResponse.json({
             reply: buildImageConfirmationReplyStrict({
@@ -2992,14 +3086,14 @@ export async function POST(req: Request) {
             images: [],
           });
         }
-    
+
         return NextResponse.json({
           reply: buildImageInfoConfirmationReply(mergedCustomerInfo),
           images: [],
         });
       } catch (error) {
         console.error("CHATBOT_IMAGE_BLOCK_ERROR:", error);
-    
+
         return NextResponse.json({
           reply:
             "น้องอ่านรูปไม่สำเร็จในรอบนี้ค่ะ รบกวนพิมพ์ชื่อ เบอร์โทร และที่อยู่เพิ่มให้น้องได้เลยนะคะ 😊",
