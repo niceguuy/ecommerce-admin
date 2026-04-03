@@ -852,7 +852,21 @@ function removeNamePrefixFromText(text: string, name: string): string {
 
 function extractAddress(text: string): string {
   const normalizedInput = cleanupThaiAddressNoise(normalizeCustomerRawText(text));
-  const detectedName = extractName(normalizedInput);
+  let detectedName = "";
+
+  const lines = splitLines(normalizedInput);
+  for (const line of lines) {
+    const candidate = cleanPossibleNameLine(line);
+    if (
+      candidate &&
+      looksLikeNameValue(candidate) &&
+      !looksLikeAddress(candidate) &&
+      !looksLikePhone(candidate)
+    ) {
+      detectedName = candidate;
+      break;
+    }
+  }
 
   const safeDetectedName =
     detectedName &&
@@ -899,8 +913,6 @@ function extractAddress(text: string): string {
   if (looksLikeAddress(cleaned)) {
     return cleaned;
   }
-
-  const lines = splitLines(normalizedInput);
 
   let bestCandidate = "";
   let bestScore = 0;
