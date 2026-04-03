@@ -1617,33 +1617,6 @@ function hasSavedImageInfoInHistory(history: ChatHistoryItem[]): boolean {
   );
 }
 
-function buildMissingFieldsText(info: ExtractedCustomerInfo): string[] {
-  const missing: string[] = [];
-
-  const realName = normalizeWhitespace(info.name || "");
-  const facebookName = normalizeWhitespace(info.facebookName || "");
-  const phone = normalizePhone(info.phone || "");
-  const address = normalizeWhitespace(info.address || "");
-
-  const hasUsableName =
-    Boolean(realName && !isLowConfidenceName(realName)) ||
-    Boolean(facebookName && !isLowConfidenceName(facebookName));
-
-  if (!hasUsableName) {
-    missing.push("ชื่อ");
-  }
-
-  if (!phone) {
-    missing.push("เบอร์โทร");
-  }
-
-  if (!isStrongThaiAddress(address)) {
-    missing.push("ที่อยู่");
-  }
-
-  return missing;
-}
-
 function buildAlreadySummarizedReply(): string {
   return "รับทราบค่ะ ออเดอร์นี้น้องสรุปไว้แล้วนะคะ 🎉 ถ้าต้องการแก้ชื่อ เบอร์ ที่อยู่ หรือเปลี่ยนโปร แจ้งน้องได้เลยค่ะ";
 }
