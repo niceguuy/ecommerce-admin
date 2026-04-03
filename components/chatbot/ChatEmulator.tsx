@@ -72,6 +72,11 @@ type ChatEmulatorProps = {
   botEnabled?: boolean;
 };
 
+type ChatPayloadHistoryItem = {
+  role: "bot" | "user";
+  text: string;
+};
+
 function fileToBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -129,12 +134,29 @@ function formatMessageDate(iso: string): string {
   }
 }
 
+function isMessageArray(value: unknown): value is Message[] {
+  return Array.isArray(value);
+}
+
+function normalizeTestSenderName(value: string): string {
+  return value.replace(/\s+/g, " ").trim();
+}
+
+function buildHistoryPayload(items: Message[]): ChatPayloadHistoryItem[] {
+  return items.map((item) => ({
+    role: item.role,
+    text: item.text,
+  }));
+}
+
 export default function ChatEmulator({
   botId,
   config,
   botEnabled = true,
 }: ChatEmulatorProps) {
-  const storageKey = `chat_emulator_v2_history_${botId}`;
+  const storageKey = `chat_emulator_v3_history_${botId}`;
+  const legacyStorageKey = `chat_emulator_v2_history_${botId}`;
+  const senderNameKey = `chat_emulator_v3_sender_name_${botId}`;
 
   const safeConfig = {
     botName: config?.botName || "AI AGENT",
@@ -152,6 +174,7 @@ export default function ChatEmulator({
   const [imagePreview, setImagePreview] = useState<string | null>(null);
   const [imagePayloads, setImagePayloads] = useState<ChatImageInput[]>([]);
   const [loading, setLoading] = useState(false);
+  const [testSenderName, setTestSenderName] = useState("");
 
   const listRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
@@ -170,18 +193,32 @@ export default function ChatEmulator({
   }, []);
 
   useEffect(() => {
+    const rawSenderName = localStorage.getItem(senderNameKey) || "";
+    setTestSenderName(rawSenderName);
+  }, [senderNameKey]);
+
+  useEffect(() => {
+    localStorage.setItem(senderNameKey, testSenderName);
+  }, [senderNameKey, testSenderName]);
+
+  useEffect(() => {
     if (!botEnabled) {
       setMessages([createMessage({ role: "bot", text: "❌ บอทยังปิดอยู่" })]);
       return;
     }
 
-    const raw = localStorage.getItem(storageKey);
+    const currentRaw = localStorage.getItem(storageKey);
+    const legacyRaw = localStorage.getItem(legacyStorageKey);
+    const sourceRaw = currentRaw || legacyRaw;
 
-    if (raw) {
+    if (sourceRaw) {
       try {
-        const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed) && parsed.length > 0) {
+        const parsed = JSON.parse(sourceRaw);
+        if (isMessageArray(parsed) && parsed.length > 0) {
           setMessages(parsed);
+          if (!currentRaw) {
+            localStorage.setItem(storageKey, JSON.stringify(parsed));
+          }
           return;
         }
       } catch (error) {
@@ -190,7 +227,7 @@ export default function ChatEmulator({
     }
 
     setMessages([createMessage({ role: "bot", text: welcomeText })]);
-  }, [botEnabled, storageKey, welcomeText]);
+  }, [botEnabled, storageKey, legacyStorageKey, welcomeText]);
 
   useEffect(() => {
     if (messages.length === 0) return;
@@ -245,10 +282,12 @@ export default function ChatEmulator({
     ];
 
     setMessages(resetMessages);
+    localStorage.removeItem(legacyStorageKey);
     localStorage.setItem(storageKey, JSON.stringify(resetMessages));
     setInput("");
     setImagePreview(null);
     setImagePayloads([]);
+    setLoading(false);
     inputRef.current?.focus();
   };
 
@@ -296,12 +335,9 @@ export default function ChatEmulator({
     try {
       const rawRole = localStorage.getItem(`chatbotRole_${botId}`) || "";
       const rawRules = localStorage.getItem(`chatbotRules_${botId}`) || "";
-      const rawProducts =
-        localStorage.getItem(`chatbotProducts_${botId}`) || "[]";
+      const rawProducts = localStorage.getItem(`chatbotProducts_${botId}`) || "[]";
       const rawSalesStrategy =
         localStorage.getItem(`chatbotSalesStrategy_${botId}`) || "{}";
-      const rawConnection =
-        localStorage.getItem(`chatbotConnection_${botId}`) || "{}";
 
       let products: ProductItem[] = [];
       let salesStrategy: SalesStrategy = {
@@ -311,9 +347,9 @@ export default function ChatEmulator({
         closingQuestionStyle: safeConfig.closingQuestionStyle || "",
         toneStyle: safeConfig.toneStyle || "",
       };
-      let senderName = "";
-      let botRole = rawRole || safeConfig.roleDescription || "";
-      let botRules = rawRules || safeConfig.responseRules || "";
+      const senderName = normalizeTestSenderName(testSenderName);
+      const botRole = rawRole || safeConfig.roleDescription || "";
+      const botRules = rawRules || safeConfig.responseRules || "";
 
       try {
         const parsedProducts = JSON.parse(rawProducts);
@@ -343,17 +379,7 @@ export default function ChatEmulator({
         console.error("parse sales strategy failed", error);
       }
 
-      try {
-        const parsedConnection = JSON.parse(rawConnection);
-        senderName = parsedConnection?.facebookPageName || "";
-      } catch (error) {
-        console.error("parse connection failed", error);
-      }
-
-      const historyPayload = messages.map((item) => ({
-        role: item.role,
-        text: item.text,
-      }));
+      const historyPayload = buildHistoryPayload(nextHistory);
 
       const res = await fetch("/api/chatbot", {
         method: "POST",
@@ -374,7 +400,11 @@ export default function ChatEmulator({
         }),
       });
 
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok) {
+        throw new Error(data?.error || data?.message || `HTTP ${res.status}`);
+      }
 
       setMessages((prev) => [
         ...prev,
@@ -390,7 +420,10 @@ export default function ChatEmulator({
         ...prev,
         createMessage({
           role: "bot",
-          text: "❌ เกิดข้อผิดพลาด",
+          text:
+            error instanceof Error
+              ? `❌ เกิดข้อผิดพลาด: ${error.message}`
+              : "❌ เกิดข้อผิดพลาด",
         }),
       ]);
     } finally {
@@ -427,6 +460,19 @@ export default function ChatEmulator({
             ใช้สำหรับทดสอบข้อความจาก training config ปัจจุบัน
           </div>
         </div>
+
+        <div className="mt-4 rounded-2xl border border-zinc-200 bg-zinc-50 p-4">
+          <div className="text-xs font-medium text-zinc-500">ชื่อผู้ทดสอบ (แทนชื่อ Facebook ลูกค้า)</div>
+          <input
+            value={testSenderName}
+            onChange={(e) => setTestSenderName(e.target.value)}
+            className="mt-2 h-11 w-full rounded-xl border border-zinc-200 bg-white px-3 text-sm text-zinc-900 outline-none placeholder:text-zinc-400"
+            placeholder="เช่น ธิติ หลำไฮสง"
+          />
+          <div className="mt-2 text-xs text-zinc-500">
+            ช่องนี้ใช้จำลองชื่อ Facebook ลูกค้าจริง เพื่อให้ fallback name ใน route ทำงานถูกต้อง
+          </div>
+        </div>
       </div>
 
       <div
@@ -445,14 +491,10 @@ export default function ChatEmulator({
           {messages.map((m) => (
             <div
               key={m.id}
-              className={`group flex ${
-                m.role === "user" ? "justify-end" : "justify-start"
-              }`}
+              className={`group flex ${m.role === "user" ? "justify-end" : "justify-start"}`}
             >
               <div
-                className={`flex max-w-[80%] flex-col ${
-                  m.role === "user" ? "items-end" : "items-start"
-                }`}
+                className={`flex max-w-[80%] flex-col ${m.role === "user" ? "items-end" : "items-start"}`}
               >
                 <div
                   className={`rounded-2xl px-4 py-3 text-sm leading-6 shadow-sm ${
