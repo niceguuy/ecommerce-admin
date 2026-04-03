@@ -354,24 +354,39 @@ export async function POST(req: NextRequest) {
 
     for (const entry of entries) {
       const pageId = String(entry?.id || "").trim();
+    
+      console.log("FB WEBHOOK ENTRY DEBUG:", {
+        pageId,
+        entryKeys: Object.keys(entry || {}),
+      });
+    
       const bot = await findBotByFacebookPageId(pageId);
-
+    
       if (!bot) {
-        console.warn("No bot found for pageId:", pageId);
+        console.warn("FB WEBHOOK: No bot found for pageId:", pageId);
         continue;
       }
-
+    
+      console.log("FB WEBHOOK: matched bot", {
+        botId: bot.id,
+        botName: bot.name,
+        botEnabled: bot.botEnabled,
+        savedPageId: bot.connectionConfig?.facebookPageId || "",
+        hasPageAccessToken: Boolean(
+          String(bot.connectionConfig?.facebookPageAccessToken || "").trim()
+        ),
+      });
+    
       if (!bot.botEnabled) {
-        console.log("Bot is disabled, skip reply:", bot.id);
+        console.log("FB WEBHOOK: Bot is disabled, skip reply:", bot.id);
         continue;
       }
-
-
+    
       const pageAccessToken =
         bot.connectionConfig?.facebookPageAccessToken || "";
-
+    
       if (!pageAccessToken) {
-        console.warn("Missing page access token for bot:", bot.id);
+        console.warn("FB WEBHOOK: Missing page access token for bot:", bot.id);
         continue;
       }
 
@@ -384,12 +399,28 @@ export async function POST(req: NextRequest) {
             const senderId = String(event?.sender?.id || "").trim();
             const isEcho = Boolean(event?.message?.is_echo);
             const messageText = String(event?.message?.text || "").trim();
-
+        
+            console.log("FB EVENT DEBUG:", {
+              senderId,
+              isEcho,
+              hasMessage: Boolean(event?.message),
+              hasAttachments: Array.isArray(event?.message?.attachments),
+              rawText: event?.message?.text || "",
+            });
+        
             if (!senderId || isEcho) {
+              console.log("FB EVENT SKIP: no senderId or echo", {
+                senderId,
+                isEcho,
+              });
               continue;
             }
-
+        
             if (!messageText) {
+              console.log("FB EVENT SKIP: empty text message", {
+                senderId,
+                attachments: event?.message?.attachments || [],
+              });
               continue;
             }
 
@@ -410,6 +441,18 @@ export async function POST(req: NextRequest) {
               messageText,
               senderName,
               history,
+            });
+            
+            console.log("FB CHATBOT RESULT DEBUG:", {
+              botId: bot.id,
+              senderId,
+              replyPreview:
+                typeof chatbotResult?.reply === "string"
+                  ? chatbotResult.reply.slice(0, 200)
+                  : "",
+              imageCount: Array.isArray(chatbotResult?.images)
+                ? chatbotResult.images.length
+                : 0,
             });
 
             const replyText =
