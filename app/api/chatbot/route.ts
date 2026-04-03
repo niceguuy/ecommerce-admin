@@ -782,6 +782,22 @@ function removeNamePrefixFromText(text: string, name: string): string {
   return normalizedText;
 }
 
+function stripTrailingOrderNoise(text: string): string {
+  let value = normalizeWhitespace(text || "");
+
+  value = value
+    .replace(/\s*(โทร|เบอร์|เบอร์โทร)\s*$/i, "")
+    .replace(/\s*(สั่ง|เอา|รับ)\s*\d+\s*(ถัง|ชิ้น|กระปุก|คู่|กล่อง|แพ็ค|ซอง|ขวด|กระสอบ).*$/i, "")
+    .replace(/\s*เก็บเงินปลายทาง.*$/i, "")
+    .replace(/\s*ส่งฟรี.*$/i, "")
+    .replace(/\s*ค่าส่ง\s*\d+.*$/i, "")
+    .replace(/\s*โปร\s*\d+.*$/i, "")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  return value;
+}
+
 function extractAddress(text: string): string {
   const normalizedInput = cleanupThaiAddressNoise(normalizeCustomerRawText(text));
   const detectedName = extractName(normalizedInput);
@@ -816,6 +832,8 @@ function extractAddress(text: string): string {
     .replace(/(\d{5})/g, " $1")
     .replace(/\s+/g, " ")
     .trim();
+
+  cleaned = stripTrailingOrderNoise(cleaned);
 
   if (looksLikeAddress(cleaned)) {
     return cleaned;
@@ -854,6 +872,8 @@ function extractAddress(text: string): string {
         .replace(/\s+/g, " ")
         .trim();
     }
+
+    candidate = stripTrailingOrderNoise(candidate);
 
     if (looksLikeAddress(candidate)) {
       return candidate;
@@ -927,7 +947,7 @@ function removeCommonOrderWords(text: string): string {
   value = value.replace(/\s+/g, " ").trim();
 
   // ตัดคำสั่งซื้อทั่วไป
-  value = value.replace(/^(เอา|รับ|สั่ง|ขอ|เลือก|เปลี่ยนเป็น|เปลี่ยน)\s*/i, "");
+  value = value.replace(/^(สนใจ|สอบถาม|ขอรายละเอียด|เอา|รับ|สั่ง|ขอ|เลือก|เปลี่ยนเป็น|เปลี่ยน)\s*/i, "");
 
   // ตัดรูปแบบจำนวน + หน่วย
   value = value.replace(/^\d+\s*(ถัง|ชิ้น|กระปุก|คู่|กล่อง|แพ็ค|ซอง|ขวด|กระสอบ)\s*/i, "");
@@ -1029,6 +1049,7 @@ function extractName(text: string): string {
 
       value = removeCommonOrderWords(value);
       value = stripOfferNoise(value);
+      value = value.replace(/^(สนใจ|สอบถาม|ขอรายละเอียด)\s*/i, "");
 
       value = value.replace(
         /^(ชื่อใหม่|แก้ชื่อ|เปลี่ยนชื่อ|ชื่อผู้รับใหม่|ผู้รับใหม่|ชื่อผู้รับ|ชื่อ)\s*/i,
@@ -1639,7 +1660,7 @@ function buildNeedMoreInfoReply(params: {
     if (field === "phone") return "เบอร์โทร";
     if (field === "address") {
       const addressMissing =
-        customerInfo?.address ? getMissingThaiAddressParts(customerInfo.address) : [];
+        customerInfo?.address ? getMissingAddressParts(customerInfo.address) : [];
       return addressMissing.length > 0
         ? `ที่อยู่ (${addressMissing.join(" / ")})`
         : "ที่อยู่";
@@ -3215,6 +3236,30 @@ export async function POST(req: Request) {
       ) {
         return NextResponse.json({
           reply: "น้องรอข้อมูลที่ขาดอยู่นะคะ 😊",
+          images: [],
+        });
+      }
+
+      const normalizedAddressForFallback = normalizeThaiAddressForCheck(finalCustomerInfo.address || "");
+      const fallbackSummaryReady =
+        Boolean((finalCustomerInfo.name || finalCustomerInfo.facebookName) && finalCustomerInfo.phone) &&
+        hasHouseNumberLike(normalizedAddressForFallback) &&
+        hasThaiProvince(normalizedAddressForFallback) &&
+        (hasThaiDistrict(normalizedAddressForFallback) ||
+          hasThaiSubdistrict(normalizedAddressForFallback) ||
+          hasAtLeastTwoThaiLocationWords(normalizedAddressForFallback) ||
+          hasRepeatedThaiLocationWord(normalizedAddressForFallback) ||
+          /\b\d{5}\b/.test(normalizedAddressForFallback));
+
+      if (fallbackSummaryReady && !hasSummarizedBefore) {
+        const reply = buildOrderSummaryText({
+          product: selectedProduct,
+          offer: finalOffer,
+          customerInfo: finalCustomerInfo,
+        });
+
+        return NextResponse.json({
+          reply,
           images: [],
         });
       }
