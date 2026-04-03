@@ -1216,17 +1216,12 @@ function mergeAddressParts(baseAddress: string, incomingAddress: string): string
   if (!incoming) return base;
   if (base === incoming) return base;
 
-  const merged = normalizeWhitespace(`${base} ${incoming}`);
-  const parts = merged.split(" ").filter(Boolean);
+  if (base.includes(incoming)) return base;
+  if (incoming.includes(base)) return incoming;
 
-  const uniqueParts: string[] = [];
-  for (const part of parts) {
-    if (!uniqueParts.includes(part)) {
-      uniqueParts.push(part);
-    }
-  }
-
-  return uniqueParts.join(" ");
+  // อย่าตัดคำซ้ำแบบ token-by-token เพราะลูกค้าจริงมักพิมพ์ location ซ้ำ
+  // เช่น "วัฒนานคร วัฒนานคร สระแก้ว" ซึ่งเป็น signal สำคัญในการเดาอำเภอ/ตำบล
+  return normalizeWhitespace(`${base} ${incoming}`);
 }
 
 function mergeCustomerInfo(
@@ -2377,6 +2372,10 @@ function hasThaiDistrict(text: string): boolean {
     return true;
   }
 
+  if (hasRepeatedThaiLocationWord(normalized) && hasThaiProvince(normalized)) {
+    return true;
+  }
+
   return false;
 }
 
@@ -2392,6 +2391,12 @@ function hasThaiSubdistrict(text: string): boolean {
   }
 
   if (hasRepeatedThaiLocationWord(normalized)) {
+    return true;
+  }
+
+  // ลูกค้าจริงมักไม่พิมพ์ label ต./ตำบล แต่ถ้ามีบ้านเลขที่ + จังหวัด + local word อย่างน้อย 1 คำ
+  // ให้ถือว่าพอเดาได้ในระดับส่งของจริง โดยค่อยไปอาศัยฐานข้อมูลไทยต่อ
+  if (hasHouseNumberLike(normalized) && hasThaiProvince(normalized) && locationWords.length >= 1) {
     return true;
   }
 
@@ -2448,6 +2453,7 @@ function getMissingAddressParts(text: string): string[] {
   const hasSubdistrict = hasThaiSubdistrict(normalized);
   const hasTwoLocationWords = hasAtLeastTwoThaiLocationWords(normalized);
   const hasRepeatedLocationWord = hasRepeatedThaiLocationWord(normalized);
+  const locationWords = extractThaiLocationWords(normalized);
 
   if (isCompleteThaiDeliveryAddress(normalized)) {
     return [];
@@ -2457,8 +2463,8 @@ function getMissingAddressParts(text: string): string[] {
 
   if (!hasHouse) missing.push("บ้านเลขที่");
   if (!hasProvince) missing.push("จังหวัด");
-  if (!hasDistrict && !hasTwoLocationWords && !hasRepeatedLocationWord) missing.push("อำเภอ");
-  if (!hasSubdistrict && !hasTwoLocationWords && !hasRepeatedLocationWord) missing.push("ตำบล");
+  if (!hasDistrict && !hasTwoLocationWords && !hasRepeatedLocationWord && locationWords.length < 1) missing.push("อำเภอ");
+  if (!hasSubdistrict && !hasTwoLocationWords && !hasRepeatedLocationWord && locationWords.length < 1) missing.push("ตำบล");
 
   return [...new Set(missing)];
 }
