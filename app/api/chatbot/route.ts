@@ -1432,13 +1432,26 @@ function mergeCustomerInfo(
   const baseNameScore = scoreNameCandidate(base.name);
   const incomingNameScore = scoreNameCandidate(incoming.name);
 
+  const mergedName =
+    incomingNameScore > baseNameScore
+      ? incoming.name
+      : incoming.name || base.name;
+
+  const mergedPhone = incoming.phone || base.phone;
+
+  let mergedAddress = mergeAddressParts(base.address, incoming.address);
+
+  if (mergedName) {
+    mergedAddress = removeDetectedNameFromAddress(mergedAddress, mergedName);
+  }
+
+  mergedAddress = trimTrailingNameFromAddress(mergedAddress);
+  mergedAddress = normalizeWhitespace(mergedAddress);
+
   return {
-    name:
-      incomingNameScore > baseNameScore
-        ? incoming.name
-        : incoming.name || base.name,
-    phone: incoming.phone || base.phone,
-    address: mergeAddressParts(base.address, incoming.address),
+    name: mergedName,
+    phone: mergedPhone,
+    address: mergedAddress,
     facebookName: incoming.facebookName || base.facebookName,
   };
 }
@@ -2108,6 +2121,29 @@ function buildOrderSummaryText(params: {
   customerInfo: ExtractedCustomerInfo;
 }): string {
   const { product, offer, customerInfo } = params;
+
+  const safeName = normalizeWhitespace(
+    customerInfo.name ||
+      customerInfo.facebookName ||
+      ""
+  );
+  
+  let safeAddress = normalizeWhitespace(customerInfo.address || "");
+  
+  if (safeName) {
+    safeAddress = removeDetectedNameFromAddress(safeAddress, safeName);
+  }
+  
+  safeAddress = trimTrailingNameFromAddress(safeAddress);
+  safeAddress = normalizeWhitespace(safeAddress);
+
+  console.log("SUMMARY_SANITIZE_DEBUG", {
+    rawName: customerInfo.name,
+    rawFacebookName: customerInfo.facebookName,
+    rawAddress: customerInfo.address,
+    safeName,
+    safeAddress,
+  });
 
   const displayName =
     getDisplayCustomerName(customerInfo) ||
