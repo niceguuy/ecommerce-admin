@@ -2010,12 +2010,13 @@ async function sendTelegramMessage(params: {
 function buildImageReadInstruction(): string {
   return [
     "ลูกค้าแนบรูปชื่อที่อยู่หรือข้อมูลจัดส่งมาในแชท",
-    "ให้อ่านข้อมูลจากภาพให้มากที่สุดเท่าที่มั่นใจ",
+    "ให้อ่านข้อมูลจากภาพให้มากที่สุดเท่าที่มั่นใจ แม้จะเป็นลายมือหรือข้อความเอียงก็ให้พยายามอ่านก่อน",
     "ข้อมูลที่ต้องพยายามหา: ชื่อผู้รับ, เบอร์โทร, ที่อยู่",
     "ห้ามเดาโปรสินค้า ห้ามเดาจำนวนสินค้า ห้ามเดาโปรโมชั่น",
-    "ถ้าอ่านได้บางส่วนให้ตอบเท่าที่อ่านได้",
-    "ถ้าตัวเขียนไม่ชัดบางคำ ให้เก็บคำที่อ่านชัดไว้ก่อน",
-    "ถ้ามีบ้านเลขที่ หมู่ ตำบล อำเภอ จังหวัด หรือรหัสไปรษณีย์ ให้รวมไว้ในที่อยู่",
+    "ถ้าอ่านได้บางส่วน ให้ตอบเท่าที่อ่านได้จริงและเก็บส่วนที่ชัดไว้ก่อน",
+    "ถ้าเห็นบ้านเลขที่ หมู่ ตำบล อำเภอ จังหวัด หรือรหัสไปรษณีย์ ให้รวมเป็นที่อยู่ทันที",
+    "ถ้ามีเบอร์โทรที่อ่านได้ชัด ให้เก็บเบอร์นั้นไว้ แม้ชื่อหรือที่อยู่จะยังไม่ครบ",
+    "ห้ามตอบว่าอ่านไม่ชัด ถ้ายังอ่านเบอร์หรือที่อยู่ได้บางส่วน",
     "ให้ตอบในรูปแบบนี้เท่านั้น:",
     "ชื่อ: ...",
     "เบอร์โทร: ...",
@@ -2039,6 +2040,67 @@ function buildImageParts(images: ChatImageInput[]) {
         data: image.dataBase64,
       },
     }));
+}
+
+function buildTextCustomerInfoInstruction(): string {
+  return [
+    "ลูกค้าส่งข้อความแชทจริงเข้ามาเพื่อสั่งสินค้าและให้ข้อมูลจัดส่ง",
+    "ให้ช่วยแยกข้อมูลจัดส่งจากข้อความรวม/ข้อความแยกกล่อง/ข้อความพิมพ์ติดกัน/มีขีดล่าง/ไม่มี label ให้ได้มากที่สุด",
+    "ข้อมูลที่ต้องพยายามหา: ชื่อผู้รับ, เบอร์โทร, ที่อยู่",
+    "ถ้ามีบ้านเลขที่ หมู่ ตำบล อำเภอ จังหวัด หรือรหัสไปรษณีย์ ให้รวมไว้ในที่อยู่",
+    "ถ้าไม่มีชื่อ แต่มีชื่อ Facebook ให้เว้นชื่อไว้ก่อน ไม่ต้องเดา",
+    "ห้ามเดาโปรสินค้า ห้ามเดาจำนวนสินค้า ห้ามเดาโปรโมชั่น",
+    "ถ้าอ่านได้บางส่วนให้ตอบเท่าที่อ่านได้",
+    "ให้ตอบในรูปแบบนี้เท่านั้น:",
+    "ชื่อ: ...",
+    "เบอร์โทร: ...",
+    "ที่อยู่: ...",
+    "สถานะ: ครบ / บางส่วน / ไม่พบ",
+    "หมายเหตุ: ...",
+  ].join("\n");
+}
+
+async function extractCustomerInfoWithAI(params: {
+  message: string;
+  history: ChatHistoryItem[];
+}): Promise<Partial<ExtractedCustomerInfo>> {
+  const recentUserText = params.history
+    .filter((item) => item.role === "user")
+    .slice(-8)
+    .map((item) => item.text)
+    .join("\n");
+
+  const prompt = [
+    buildTextCustomerInfoInstruction(),
+    "",
+    "ข้อความลูกค้าล่าสุดและประวัติแชต:",
+    recentUserText,
+    params.message,
+  ]
+    .filter(Boolean)
+    .join("\n");
+
+  try {
+    const response = await ai.models.generateContent({
+      model: "gemini-2.5-flash",
+      contents: [
+        {
+          role: "user",
+          parts: [{ text: prompt }],
+        },
+      ],
+    });
+
+    const parsed = parseImageReadingResult(response?.text?.trim() || "");
+    return {
+      name: parsed.name || "",
+      phone: parsed.phone || "",
+      address: parsed.address || "",
+    };
+  } catch (error) {
+    console.error("extractCustomerInfoWithAI error:", error);
+    return {};
+  }
 }
 
 function parseImageReadingResult(text: string): {
@@ -2272,16 +2334,30 @@ function normalizeThaiAddressForCheck(value: string): string {
 }
 
 function extractThaiLocationWords(text: string): string[] {
-  return normalizeThaiAddressForCheck(text)
+  const normalized = normalizeThaiAddressForCheck(text)
+    .replace(/\b(เบอร์โทร|เบอร์|โทร|ที่อยู่|ชื่อผู้รับ|ชื่อ|หมู่|ม\.?|ต\.?|อ\.?|จ\.?)\b/g, " ")
+    .replace(/\b(?:กรุงเทพ|กทม|กระบี่|กาญจนบุรี|กาฬสินธุ์|กำแพงเพชร|ขอนแก่น|จันทบุรี|ฉะเชิงเทรา|ชลบุรี|ชัยนาท|ชัยภูมิ|ชุมพร|เชียงราย|เชียงใหม่|ตรัง|ตราด|ตาก|นครนายก|นครปฐม|นครพนม|นครราชสีมา|นครศรีธรรมราช|นครสวรรค์|นนทบุรี|นราธิวาส|น่าน|บึงกาฬ|บุรีรัมย์|ปทุมธานี|ประจวบคีรีขันธ์|ปราจีนบุรี|ปัตตานี|พระนครศรีอยุธยา|พะเยา|พังงา|พัทลุง|พิจิตร|พิษณุโลก|เพชรบุรี|เพชรบูรณ์|แพร่|ภูเก็ต|มหาสารคาม|มุกดาหาร|แม่ฮ่องสอน|ยโสธร|ยะลา|ร้อยเอ็ด|ระนอง|ระยอง|ราชบุรี|ลพบุรี|ลำปาง|ลำพูน|เลย|ศรีสะเกษ|สกลนคร|สงขลา|สตูล|สมุทรปราการ|สมุทรสงคราม|สมุทรสาคร|สระแก้ว|สระบุรี|สิงห์บุรี|สุโขทัย|สุพรรณบุรี|สุราษฎร์ธานี|สุรินทร์|หนองคาย|หนองบัวลำภู|อ่างทอง|อุดรธานี|อุทัยธานี|อุตรดิตถ์|อุบลราชธานี|อำนาจเจริญ)\b/g, " ")
+    .replace(/\b\d{5}\b/g, " ")
+    .replace(/\b\d+(?:\/\d+)?\b/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  return normalized
     .split(" ")
     .map((part) => part.trim())
-    .filter(
-      (part) =>
-        Boolean(part) &&
-        !/^\d+(\/\d+)?$/.test(part) &&
-        !/^0\d{9}$/.test(part) &&
-        !["ชื่อ", "เบอร์", "เบอร์โทร", "ที่อยู่", "หมู่", "ม", "ต", "อ", "จ"].includes(part)
-    );
+    .filter((part) => /^[ก-๙]{2,}$/.test(part));
+}
+
+function getThaiLocationWordCounts(text: string): Record<string, number> {
+  const counts: Record<string, number> = {};
+  for (const word of extractThaiLocationWords(text)) {
+    counts[word] = (counts[word] || 0) + 1;
+  }
+  return counts;
+}
+
+function hasRepeatedThaiLocationWord(text: string): boolean {
+  return Object.values(getThaiLocationWordCounts(text)).some((count) => count >= 2);
 }
 
 function hasThaiProvince(text: string): boolean {
@@ -2291,15 +2367,35 @@ function hasThaiProvince(text: string): boolean {
 }
 
 function hasThaiDistrict(text: string): boolean {
-  return /(อำเภอ|อ\.|เขต|เมือง|วัฒนานคร|อรัญประเทศ|กบินทร์บุรี|บางนา|ลาดกระบัง|บางบัวทอง|ธัญบุรี)/.test(
-    normalizeThaiAddressForCheck(text)
-  );
+  const normalized = normalizeThaiAddressForCheck(text);
+  if (/(อำเภอ|อ\.|เขต|เมือง|อรัญประเทศ|กบินทร์บุรี|บางนา|ลาดกระบัง|บางบัวทอง|ธัญบุรี|วัฒนานคร)/.test(normalized)) {
+    return true;
+  }
+
+  const locationWords = extractThaiLocationWords(normalized);
+  if (locationWords.length >= 1 && hasThaiProvince(normalized)) {
+    return true;
+  }
+
+  return false;
 }
 
 function hasThaiSubdistrict(text: string): boolean {
-  return /(ตำบล|ต\.|แขวง|วัฒนานคร|ห้วยโจด|ท่าเกษม|บ้านแก้ง|หนองน้ำใส|คลองหาด)/.test(
-    normalizeThaiAddressForCheck(text)
-  );
+  const normalized = normalizeThaiAddressForCheck(text);
+  if (/(ตำบล|ต\.|แขวง|ห้วยโจด|ท่าเกษม|บ้านแก้ง|หนองน้ำใส|คลองหาด|วัฒนานคร)/.test(normalized)) {
+    return true;
+  }
+
+  const locationWords = extractThaiLocationWords(normalized);
+  if (locationWords.length >= 2) {
+    return true;
+  }
+
+  if (hasRepeatedThaiLocationWord(normalized)) {
+    return true;
+  }
+
+  return false;
 }
 
 function hasHouseNumberLike(text: string): boolean {
@@ -2314,25 +2410,26 @@ function isCompleteThaiDeliveryAddress(text: string): boolean {
   const normalized = normalizeThaiAddressForCheck(text);
   if (!normalized) return false;
 
-  const strong = isStrongThaiAddress(normalized);
-  if (strong) return true;
+  if (isStrongThaiAddress(normalized)) return true;
 
   const hasHouse = hasHouseNumberLike(normalized);
   const hasProvince = hasThaiProvince(normalized);
   const hasDistrict = hasThaiDistrict(normalized);
   const hasSubdistrict = hasThaiSubdistrict(normalized);
   const hasZip = /\b\d{5}\b/.test(normalized);
-  const hasTwoLocationWords = hasAtLeastTwoThaiLocationWords(normalized);
+  const locationWords = extractThaiLocationWords(normalized);
+  const hasTwoLocationWords = locationWords.length >= 2;
+  const hasRepeatedLocationWord = hasRepeatedThaiLocationWord(normalized);
 
-  if (hasHouse && hasProvince && hasDistrict && hasSubdistrict) {
-    return true;
-  }
+  if (hasHouse && hasProvince && hasDistrict && hasSubdistrict) return true;
+  if (hasHouse && hasProvince && hasDistrict && hasZip) return true;
+  if (hasHouse && hasProvince && hasTwoLocationWords) return true;
 
-  if (hasHouse && hasProvince && hasDistrict && hasZip) {
-    return true;
-  }
+  // รองรับเคสลูกค้าพิมพ์แบบ "201 หมู่ 11 วัฒนานคร วัฒนานคร สระแก้ว"
+  if (hasHouse && hasProvince && hasRepeatedLocationWord) return true;
 
-  if (hasHouse && hasProvince && hasTwoLocationWords) {
+  // รองรับเคสไม่มี label ชัด แต่มีบ้านเลขที่ + คำ location ไทยหลายคำ + จังหวัด
+  if (hasHouse && hasProvince && locationWords.length >= 1 && /\bหมู่\b|ม\s*\d+|ม\./.test(normalized)) {
     return true;
   }
 
@@ -2350,24 +2447,18 @@ function getMissingAddressParts(text: string): string[] {
   const hasDistrict = hasThaiDistrict(normalized);
   const hasSubdistrict = hasThaiSubdistrict(normalized);
   const hasTwoLocationWords = hasAtLeastTwoThaiLocationWords(normalized);
+  const hasRepeatedLocationWord = hasRepeatedThaiLocationWord(normalized);
+
+  if (isCompleteThaiDeliveryAddress(normalized)) {
+    return [];
+  }
 
   const missing: string[] = [];
 
-  if (!hasHouse) {
-    missing.push("บ้านเลขที่");
-  }
-
-  if (!hasProvince) {
-    missing.push("จังหวัด");
-  }
-
-  if (!hasDistrict && !hasTwoLocationWords) {
-    missing.push("อำเภอ");
-  }
-
-  if (!hasSubdistrict && !hasTwoLocationWords) {
-    missing.push("ตำบล");
-  }
+  if (!hasHouse) missing.push("บ้านเลขที่");
+  if (!hasProvince) missing.push("จังหวัด");
+  if (!hasDistrict && !hasTwoLocationWords && !hasRepeatedLocationWord) missing.push("อำเภอ");
+  if (!hasSubdistrict && !hasTwoLocationWords && !hasRepeatedLocationWord) missing.push("ตำบล");
 
   return [...new Set(missing)];
 }
@@ -2722,11 +2813,37 @@ export async function POST(req: Request) {
       editIntent
     );
 
-    const finalCustomerInfo: ExtractedCustomerInfo = buildSafeCustomerInfo({
+    let finalCustomerInfo: ExtractedCustomerInfo = buildSafeCustomerInfo({
       editedCustomerInfo,
       senderName,
       selectedProduct,
     });
+
+    const likelyCustomerInfoText =
+      containsCustomerInfo(safeMessage) ||
+      Boolean(
+        finalCustomerInfo.name ||
+        finalCustomerInfo.phone ||
+        finalCustomerInfo.address
+      );
+
+    if (likelyCustomerInfoText) {
+      const aiCustomerInfo = await extractCustomerInfoWithAI({
+        message: safeMessage,
+        history,
+      });
+
+      finalCustomerInfo = buildSafeCustomerInfo({
+        editedCustomerInfo: mergeCustomerInfo(finalCustomerInfo, {
+          name: aiCustomerInfo.name || "",
+          phone: aiCustomerInfo.phone || "",
+          address: aiCustomerInfo.address || "",
+          facebookName: senderName || "",
+        }),
+        senderName,
+        selectedProduct,
+      });
+    }
 
     const hasCustomerData = Boolean(
       finalCustomerInfo.name ||
