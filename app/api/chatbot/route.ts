@@ -2256,127 +2256,55 @@ function normalizeThaiAddressForCheck(value: string): string {
 }
 
 function hasThaiProvince(text: string): boolean {
-  const value = normalizeThaiAddressForCheck(text);
-
-  return /(กรุงเทพ|กทม|กระบี่|กาญจนบุรี|กาฬสินธุ์|กำแพงเพชร|ขอนแก่น|จันทบุรี|ฉะเชิงเทรา|ชลบุรี|ชัยนาท|ชัยภูมิ|ชุมพร|เชียงราย|เชียงใหม่|ตรัง|ตราด|ตาก|นครนายก|นครปฐม|นครพนม|นครราชสีมา|นครศรีธรรมราช|นครสวรรค์|นนทบุรี|นราธิวาส|น่าน|บึงกาฬ|บุรีรัมย์|ปทุมธานี|ประจวบคีรีขันธ์|ปราจีนบุรี|ปัตตานี|พระนครศรีอยุธยา|พะเยา|พังงา|พัทลุง|พิจิตร|พิษณุโลก|เพชรบุรี|เพชรบูรณ์|แพร่|ภูเก็ต|มหาสารคาม|มุกดาหาร|แม่ฮ่องสอน|ยโสธร|ยะลา|ร้อยเอ็ด|ระนอง|ระยอง|ราชบุรี|ลพบุรี|ลำปาง|ลำพูน|เลย|ศรีสะเกษ|สกลนคร|สงขลา|สตูล|สมุทรปราการ|สมุทรสงคราม|สมุทรสาคร|สระแก้ว|สระบุรี|สิงห์บุรี|สุโขทัย|สุพรรณบุรี|สุราษฎร์ธานี|สุรินทร์|หนองคาย|หนองบัวลำภู|อ่างทอง|อุดรธานี|อุทัยธานี|อุตรดิตถ์|อุบลราชธานี|อำนาจเจริญ)/.test(
-    value
+  return /(?:กรุงเทพ|กทม|กระบี่|กาญจนบุรี|กาฬสินธุ์|กำแพงเพชร|ขอนแก่น|จันทบุรี|ฉะเชิงเทรา|ชลบุรี|ชัยนาท|ชัยภูมิ|ชุมพร|เชียงราย|เชียงใหม่|ตรัง|ตราด|ตาก|นครนายก|นครปฐม|นครพนม|นครราชสีมา|นครศรีธรรมราช|นครสวรรค์|นนทบุรี|นราธิวาส|น่าน|บึงกาฬ|บุรีรัมย์|ปทุมธานี|ประจวบคีรีขันธ์|ปราจีนบุรี|ปัตตานี|พระนครศรีอยุธยา|พะเยา|พังงา|พัทลุง|พิจิตร|พิษณุโลก|เพชรบุรี|เพชรบูรณ์|แพร่|ภูเก็ต|มหาสารคาม|มุกดาหาร|แม่ฮ่องสอน|ยโสธร|ยะลา|ร้อยเอ็ด|ระนอง|ระยอง|ราชบุรี|ลพบุรี|ลำปาง|ลำพูน|เลย|ศรีสะเกษ|สกลนคร|สงขลา|สตูล|สมุทรปราการ|สมุทรสงคราม|สมุทรสาคร|สระแก้ว|สระบุรี|สิงห์บุรี|สุโขทัย|สุพรรณบุรี|สุราษฎร์ธานี|สุรินทร์|หนองคาย|หนองบัวลำภู|อ่างทอง|อุดรธานี|อุทัยธานี|อุตรดิตถ์|อุบลราชธานี|อำนาจเจริญ)/.test(
+    normalizeThaiAddressForCheck(text)
   );
 }
 
 function hasThaiDistrict(text: string): boolean {
-  const value = normalizeThaiAddressForCheck(text);
-
   return /(อำเภอ|อ\.|เขต|เมือง|วัฒนานคร|อรัญประเทศ|กบินทร์บุรี|บางนา|ลาดกระบัง|บางบัวทอง|ธัญบุรี)/.test(
-    value
+    normalizeThaiAddressForCheck(text)
   );
 }
 
 function hasThaiSubdistrict(text: string): boolean {
-  const value = normalizeThaiAddressForCheck(text);
-
   return /(ตำบล|ต\.|แขวง|วัฒนานคร|ห้วยโจด|ท่าเกษม|บ้านแก้ง|หนองน้ำใส|คลองหาด)/.test(
-    value
+    normalizeThaiAddressForCheck(text)
   );
 }
 
 function hasHouseNumberLike(text: string): boolean {
-  const value = normalizeThaiAddressForCheck(text);
-
-  return /\b\d{1,4}(\/\d{1,4})?\b/.test(value);
+  return /\d{1,4}(\/\d{1,4})?/.test(normalizeThaiAddressForCheck(text));
 }
 
 function isCompleteThaiDeliveryAddress(text: string): boolean {
-  const value = normalizeThaiAddressForCheck(text);
-  if (!value) return false;
-
-  const hasHouse = hasHouseNumberLike(value);
-  const hasSubdistrict = hasThaiSubdistrict(value);
-  const hasDistrict = hasThaiDistrict(value);
-  const hasProvince = hasThaiProvince(value);
-
-  const bangkokStyle =
-    /(กรุงเทพ|กทม)/.test(value) &&
-    /(เขต)/.test(value) &&
-    /(แขวง)/.test(value) &&
-    hasHouse;
-
-  const regionalStyle =
-    hasHouse &&
-    hasProvince &&
-    hasDistrict &&
-    hasSubdistrict;
-
-  return Boolean(bangkokStyle || regionalStyle);
+  return isStrongThaiAddress(text);
 }
 
 function getMissingAddressParts(text: string): string[] {
-  const value = normalizeThaiAddressForCheck(text);
-  if (!value) {
-    return ["บ้านเลขที่", "ตำบล", "อำเภอ", "จังหวัด"];
-  }
-
-  const missing: string[] = [];
-
-  if (!hasHouseNumberLike(value)) missing.push("บ้านเลขที่");
-  if (!hasThaiSubdistrict(value)) missing.push("ตำบล");
-  if (!hasThaiDistrict(value)) missing.push("อำเภอ");
-  if (!hasThaiProvince(value)) missing.push("จังหวัด");
-
-  return missing;
+  return getMissingThaiAddressParts(text);
 }
 
 function hasEnoughInfoForCodSummary(customerInfo: ExtractedCustomerInfo): boolean {
-  const phone = (customerInfo.phone || "").trim();
-  const address = (customerInfo.address || "").trim();
-  const name = (customerInfo.name || "").trim();
-  const facebookName = (customerInfo.facebookName || "").trim();
-
-  return Boolean(
-    phone &&
-    isCompleteThaiDeliveryAddress(address) &&
-    (name || facebookName)
-  );
+  return hasCompleteCustomerInfo(customerInfo, { allowFacebookName: true });
 }
 
 function getStrictMissingCustomerFields(
   customerInfo: ExtractedCustomerInfo
 ): Array<"name" | "phone" | "address"> {
-  const missing: Array<"name" | "phone" | "address"> = [];
-
-  if (!(customerInfo.name || customerInfo.facebookName)) {
-    missing.push("name");
-  }
-
-  if (!customerInfo.phone) {
-    missing.push("phone");
-  }
-
-  if (!isCompleteThaiDeliveryAddress(customerInfo.address || "")) {
-    missing.push("address");
-  }
-
-  return missing;
+  return getMissingCustomerFields(customerInfo) as Array<"name" | "phone" | "address">;
 }
 
 function buildNeedMoreAddressDetailText(address: string): string {
-  const missingParts = getMissingAddressParts(address);
-
-  if (missingParts.length === 0) {
-    return "ที่อยู่";
-  }
-
-  return missingParts.join(" / ");
+  const missingParts = getMissingThaiAddressParts(address);
+  return missingParts.length > 0 ? missingParts.join(" / ") : "ที่อยู่";
 }
 
 function buildImageConfirmationReplyStrict(params: {
   customerInfo: ExtractedCustomerInfo;
   missingFields: Array<"name" | "phone" | "address">;
 }): string {
-  const displayName =
-    params.customerInfo.name ||
-    params.customerInfo.facebookName ||
-    "-";
-
+  const displayName = getDisplayCustomerName(params.customerInfo) || "-";
   const missingText = params.missingFields
     .map((field) => {
       if (field === "phone") return "เบอร์โทร";
@@ -2397,6 +2325,7 @@ function buildImageConfirmationReplyStrict(params: {
     missingText
       ? `ตอนนี้ยังขาด ${missingText}`
       : "ถ้าข้อมูลถูกต้อง พิมพ์ ยืนยัน ได้เลยนะคะ",
+    "ถ้ามีจุดไหนไม่ถูก พิมพ์แก้ชื่อ / แก้เบอร์ / แก้ที่อยู่ ส่งมาได้เลยนะคะ 😊",
   ]
     .filter(Boolean)
     .join("\n");
@@ -2720,9 +2649,13 @@ export async function POST(req: Request) {
 
     const hasAnyCustomerInfo = hasCustomerData;
 
-    const hasCompleteInfo = hasEnoughInfoForCodSummary(finalCustomerInfo);
+    const hasCompleteInfo = hasCompleteCustomerInfo(finalCustomerInfo, {
+      allowFacebookName: true,
+    });
 
-    const missingFields = getStrictMissingCustomerFields(finalCustomerInfo);
+    const missingFields = getMissingCustomerFields(finalCustomerInfo) as Array<
+      "name" | "phone" | "address"
+    >;
 
     const botAskedForInfo = hasBotAskedForCustomerInfo(history);
     const hasSavedImageInfoBefore = hasSavedImageInfoInHistory(history);
@@ -2887,8 +2820,15 @@ export async function POST(req: Request) {
           selectedProduct,
         });
     
-        const missingFromImage = getStrictMissingCustomerFields(mergedCustomerInfo);
-        const imageHasCompleteInfo = hasEnoughInfoForCodSummary(mergedCustomerInfo);
+        const imageOffer =
+          finalOffer || (activeOffers.length === 1 ? activeOffers[0] : null);
+
+        const missingFromImage = getMissingCustomerFields(
+          mergedCustomerInfo
+        ) as Array<"name" | "phone" | "address">;
+        const imageHasCompleteInfo = hasCompleteCustomerInfo(mergedCustomerInfo, {
+          allowFacebookName: true,
+        });
     
         if (
           parsedImageData.unreadable &&
@@ -2903,7 +2843,7 @@ export async function POST(req: Request) {
           });
         }
     
-        if (!finalOffer) {
+        if (!imageOffer) {
           return NextResponse.json({
             reply:
               missingFromImage.length === 0
@@ -2916,10 +2856,10 @@ export async function POST(req: Request) {
           });
         }
     
-        if (finalOffer && imageHasCompleteInfo && selectedProduct) {
+        if (imageOffer && imageHasCompleteInfo && selectedProduct) {
           const reply = buildOrderSummaryText({
             product: selectedProduct,
-            offer: finalOffer,
+            offer: imageOffer,
             customerInfo: mergedCustomerInfo,
           });
     
@@ -2932,7 +2872,7 @@ export async function POST(req: Request) {
             eventType: telegramEventType,
             orderId,
             product: selectedProduct,
-            offer: finalOffer,
+            offer: imageOffer,
             customerInfo: mergedCustomerInfo,
             botName: chatbot?.name || "",
             pageName:
@@ -3005,12 +2945,7 @@ export async function POST(req: Request) {
       hasCompleteInfo &&
       !hasSummarizedBefore
     ) {
-      if (!isCompleteThaiDeliveryAddress(finalCustomerInfo.address || "")) {
-        return NextResponse.json({
-          reply: `ยังขาดที่อยู่สำหรับจัดส่งค่ะ รบกวนส่งเพิ่มเป็น บ้านเลขที่ / ตำบล / อำเภอ / จังหวัด นะคะ 😊`,
-          images: [],
-        });
-      }
+
       const reply = buildOrderSummaryText({
         product: selectedProduct,
         offer: finalOffer,
@@ -3074,7 +3009,7 @@ export async function POST(req: Request) {
         });
       }
 
-      const addressMissingText = !isCompleteThaiDeliveryAddress(finalCustomerInfo.address || "")
+      const addressMissingText = missingFields.includes("address")
         ? buildNeedMoreAddressDetailText(finalCustomerInfo.address || "")
         : "";
 
@@ -3117,98 +3052,6 @@ export async function POST(req: Request) {
       return NextResponse.json({
         reply,
         images: [],
-      });
-    }
-
-    /**
-     * 8) first message แบบ AI promo
-     * ยังส่งรูปเฉพาะทักแรก
-     */
-    if (
-      selectedProduct &&
-      firstCustomerMessage &&
-      effectiveSalesStrategy.showOffersInFirstReply &&
-      offersForFirstReply.length > 0 &&
-      !hasRecentlySentPromoBlock(history) &&
-      !finalOffer &&
-      !shouldNotShowOffersAgain &&
-      !hasCustomerData &&
-      !hasBotAskedForCustomerInfo(history) &&
-      !containsCustomerInfo(message) &&
-      (broadPriceIntent || isInterestIntent(safeMessage))
-    ) {
-      const promoContext = [
-        `บทบาทบอท: ${effectiveBotRole || "คุณคือแอดมินขายของออนไลน์"}`,
-        `กฎการตอบ: ${effectiveBotRules ||
-        "ตอบเหมือนแอดมินขายจริง สุภาพ เป็นกันเอง ปิดการขายแบบธรรมชาติ"
-        }`,
-        `น้ำเสียง: ${effectiveSalesStrategy.toneStyle || "สุภาพ เป็นกันเอง แบบคนขายจริง"
-        }`,
-        `สไตล์เปิดบทสนทนา: ใช้เป็นแนวทางภายในเท่านั้น อย่าพูดข้อความคำสั่งนี้ตรง ๆ กับลูกค้า`,
-        effectiveSalesStrategy.openingStyle
-          ? `แนวทางเปิดบทสนทนา (สรุปความแล้วเอาไปใช้ ไม่ต้องคัดลอก): ${effectiveSalesStrategy.openingStyle}`
-          : "",
-        `สไตล์ปิดท้าย: ใช้เป็นแนวทางภายในเท่านั้น อย่าพูดข้อความคำสั่งนี้ตรง ๆ กับลูกค้า`,
-        effectiveSalesStrategy.closingQuestionStyle
-          ? `แนวทางปิดท้าย (สรุปความแล้วเอาไปใช้ ไม่ต้องคัดลอก): ${effectiveSalesStrategy.closingQuestionStyle}`
-          : "",
-        `ลูกค้าพิมพ์ว่า: ${safeMessage}`,
-        "",
-        `สินค้า: ${selectedProduct.name}`,
-        selectedProduct.salesNote
-          ? `ข้อความขายสั้น: ${selectedProduct.salesNote}`
-          : "",
-        selectedProduct.description
-          ? `รายละเอียด: ${selectedProduct.description}`
-          : "",
-        selectedProduct.highlights ? `จุดเด่น: ${selectedProduct.highlights}` : "",
-        "",
-        "โปรโมชั่นที่มี:",
-        ...offersForFirstReply.map((offer, index) => {
-          return [
-            `โปร ${index + 1}`,
-            `ชื่อโปร: ${offer.title}`,
-            offer.price ? `ราคา: ${offer.price} บาท` : "",
-            offer.note ? `หมายเหตุ: ${offer.note}` : "",
-          ]
-            .filter(Boolean)
-            .join(" | ");
-        }),
-        "",
-        "คำสั่งสำคัญ:",
-        "- เขียนคำตอบให้เหมือนแอดมินขายของจริงในแชท",
-        "- ภาษาต้องลื่น อ่านแล้วเป็นคนตอบ ไม่ใช่ระบบ",
-        "- ใช้อีโมจิได้พอดี ๆ ให้ดูขายเก่ง แต่ไม่เยอะเกิน",
-        "- ชูจุดเด่นสินค้าแบบกระชับ",
-        `- สรุปจำนวนโปรตามข้อมูลที่มีจริง แต่ไม่เกิน ${maxOffers} โปร`,
-        "- ปิดท้ายด้วยคำถามชวนเลือกซื้อสั้น ๆ",
-        "- ห้ามตอบแข็ง ห้ามตอบเป็นภาษาระบบ",
-        "- ห้ามคัดลอกข้อความจากแนวเปิดบทสนทนา แนวปิดท้าย หรือกฎการตอบออกมาตรง ๆ",
-      ]
-        .filter(Boolean)
-        .join("\n");
-
-      const promoAiResponse = await ai.models.generateContent({
-        model: "gemini-2.5-flash",
-        contents: promoContext,
-      });
-
-      const reply =
-        promoAiResponse?.text?.trim() ||
-        buildPromoReply({
-          product: selectedProduct,
-          offers: offersForFirstReply,
-          salesStrategy: effectiveSalesStrategy,
-        });
-
-      console.log("CHATBOT_IMAGE_FINAL_DEBUG", {
-        firstTouchImages,
-        replyPreview: reply?.slice?.(0, 120) || "",
-      });
-
-      return NextResponse.json({
-        reply,
-        images: firstTouchImages,
       });
     }
 
