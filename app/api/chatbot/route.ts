@@ -1687,8 +1687,15 @@ function cleanupBrokenAddressSuffix(text: string): string {
     .replace(/(\bจ\.\s*[ก-๙]+(?:\s+[ก-๙]+)?)\s+\1\b/gi, "$1")
     .replace(/(\bต\.\s*[ก-๙]+(?:\s+[ก-๙]+)?)\s+\1\b/gi, "$1")
 
-    // ตัด "โทร" หรือ label ค้างท้าย
+    // ตัด label ค้างท้าย
     .replace(/\s+(โทร|เบอร์|เบอร์โทร)\.?\s*$/gi, "")
+
+    // ตัด marker ลอยท้าย เช่น "ต." / "อ." / "จ." หรือ "ต. อ. จ."
+    .replace(/\s+(?:ต\.?|อ\.?|จ\.?)(?:\s+(?:ต\.?|อ\.?|จ\.?))*\s*$/gi, "")
+
+    // ตัด marker ลอยท้ายแบบไม่มีจุด เช่น "ต อ จ"
+    .replace(/\s+(?:ต|อ|จ)(?:\s+(?:ต|อ|จ))*\s*$/gi, "")
+
     .replace(/\s+/g, " ")
     .trim();
 
@@ -1774,7 +1781,8 @@ function repairExtractedCustomerInfoFromRawText(
     info.address || "",
     extractAddress(normalizedRaw)
   );
-
+  repairedAddress = cleanupBrokenAddressSuffix(repairedAddress);
+  repairedAddress = normalizeWhitespace(repairedAddress);
   repairedAddress = removeMaskedPhoneGarbage(repairedAddress);
   repairedAddress = normalizeWhitespace(repairedAddress);
 
@@ -2827,6 +2835,7 @@ function buildOrderSummaryText(params: {
   safeAddress = trimTrailingNameFromAddress(safeAddress);
   safeAddress = cleanupBrokenAddressSuffix(safeAddress);
   safeAddress = normalizeWhitespace(safeAddress);
+  safeAddress = cleanupBrokenAddressSuffix(safeAddress);
 
   console.log("SUMMARY_SANITIZE_DEBUG", {
     rawName: customerInfo.name,
