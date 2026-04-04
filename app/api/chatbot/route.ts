@@ -1249,6 +1249,28 @@ function extractAddress(text: string): string {
     return normalizeWhitespace(bestCandidate);
   }
 
+  // fallback สำหรับข้อความติดกันยาว ๆ เช่น
+  // "สมสินชุมสงฆ์95/12พหลโยธิน64คูคตลาดลูกกาปทุมธานี121300878317075"
+  const packed = splitPackedThaiCustomerText(normalizedInput);
+
+  const houseMatch = packed.match(/\b\d{1,4}(\/\d{1,4})?\b/);
+  const provinceZipMatch = packed.match(
+    /(กรุงเทพ|กทม|กระบี่|กาญจนบุรี|กาฬสินธุ์|กำแพงเพชร|ขอนแก่น|จันทบุรี|ฉะเชิงเทรา|ชลบุรี|ชัยนาท|ชัยภูมิ|ชุมพร|เชียงราย|เชียงใหม่|ตรัง|ตราด|ตาก|นครนายก|นครปฐม|นครพนม|นครราชสีมา|นครศรีธรรมราช|นครสวรรค์|นนทบุรี|นราธิวาส|น่าน|บึงกาฬ|บุรีรัมย์|ปทุมธานี|ประจวบคีรีขันธ์|ปราจีนบุรี|ปัตตานี|พระนครศรีอยุธยา|อยุธยา|พะเยา|พังงา|พัทลุง|พิจิตร|พิษณุโลก|เพชรบุรี|เพชรบูรณ์|แพร่|ภูเก็ต|มหาสารคาม|มุกดาหาร|แม่ฮ่องสอน|ยโสธร|ยะลา|ร้อยเอ็ด|ระนอง|ระยอง|ราชบุรี|ลพบุรี|ลำปาง|ลำพูน|เลย|ศรีสะเกษ|สกลนคร|สงขลา|สตูล|สมุทรปราการ|สมุทรสงคราม|สมุทรสาคร|สระแก้ว|สระบุรี|สิงห์บุรี|สุโขทัย|สุพรรณบุรี|สุราษฎร์ธานี|สุรินทร์|หนองคาย|หนองบัวลำภู|อ่างทอง|อุดรธานี|อุทัยธานี|อุตรดิตถ์|อุบลราชธานี|อำนาจเจริญ)\s+\d{5}/
+  );
+
+  if (houseMatch && provinceZipMatch) {
+    const start = houseMatch.index ?? -1;
+    const end = (provinceZipMatch.index ?? -1) + provinceZipMatch[0].length;
+
+    if (start >= 0 && end > start) {
+      const candidate = normalizeWhitespace(packed.slice(start, end));
+
+      if (looksLikeAddress(candidate)) {
+        return candidate;
+      }
+    }
+  }
+
   return "";
 }
 
@@ -1346,13 +1368,14 @@ function cleanPossibleNameLine(line: string): string {
     value = value.replace(govPrefix, " ");
   }
 
-  const addressIndex = findThaiAddressStartIndex(value);
-  if (addressIndex > 0) {
-    value = value.slice(0, addressIndex);
+  const firstAddressIndex = findThaiAddressStartIndex(value);
+  if (firstAddressIndex > 0) {
+    value = value.slice(0, firstAddressIndex);
   }
 
   value = value
-    .replace(/\b(โทร|โทรศัพท์|เบอร์|เบอร์โทร)\b/gi, " ")
+    .replace(/\b(โทร|โทรศัพท์|เบอร์|เบอร์โทร)\b\.?/gi, " ")
+    .replace(/\b(พหลโยธิน|คูคต|ลาดลูกกา|ลำลูกกา|ปทุมธานี|อยุธยา|พระนครศรีอยุธยา|ตาก|สุรินทร์|สระแก้ว|วัฒนานคร|บางนางร้า|บางปะหัน|พบพระ|ชุมพลบุรี|สระขุด)\b/gi, " ")
     .replace(/[,:;|/\\]+/g, " ")
     .replace(/\b\d+\b/g, " ")
     .replace(/\s+/g, " ")
@@ -1561,12 +1584,13 @@ function pickPackedNameCandidate(
 
   const candidate = cleanPossibleNameLine(working);
 
-  if (looksLikeNameValue(candidate)) {
+  if (
+    candidate &&
+    !looksLikeAddress(candidate) &&
+    !/(\d{1,4}\/\d{1,4}|\b\d{5}\b|พหลโยธิน|คูคต|ลาดลูกกา|ลำลูกกา|ปทุมธานี|อยุธยา|พระนครศรีอยุธยา|ตาก|พบพระ|สุรินทร์|สระแก้ว|วัฒนานคร|บางนางร้า|บางปะหัน|ชุมพลบุรี|สระขุด)/i.test(candidate) &&
+    looksLikeNameValue(candidate)
+  ) {
     return candidate;
-  }
-
-  if (/(\d{1,4}\/\d{1,4}|\b\d{5}\b|พหลโยธิน|คูคต|ลำลูกกา|ปทุมธานี|ตาก|พบพระ)/i.test(candidate)) {
-    return currentName || "";
   }
 
   return currentName || "";
@@ -1704,7 +1728,14 @@ ${text}
       text,
       mergeCustomerInfo(ruleBased, aiParsed)
     );
-  } catch (error) {
+  } catch (error: any) {
+    const status = error?.status || error?.response?.status || 0;
+
+    if (status === 403) {
+      console.error("AI_CUSTOMER_PARSE_FAILED_403");
+      return ruleBased;
+    }
+
     console.error("AI_CUSTOMER_PARSE_FAILED", error);
     return ruleBased;
   }
@@ -3175,7 +3206,7 @@ function getStrictMissingCustomerFields(
     missing.push("phone");
   }
 
-  if (!isCompleteThaiDeliveryAddress(customerInfo.address || "")) {
+  if (!hasEnoughThaiAddressForCOD(customerInfo.address || "")) {
     missing.push("address");
   }
 
