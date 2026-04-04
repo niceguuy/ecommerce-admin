@@ -527,27 +527,47 @@ function looksLikePhone(text: string): boolean {
 }
 
 function normalizePhone(text: string): string {
-  const digits = text.replace(/\D/g, "");
+  const digits = (text || "").replace(/\D/g, "");
 
   if (/^0\d{9}$/.test(digits)) return digits;
   if (/^66\d{9}$/.test(digits)) return `0${digits.slice(2)}`;
+
+  // กันเคสมีเลขเกินมาติดหน้า เช่น 121300878317075 -> ต้องดึง 0878317075
+  const localMatches = digits.match(/0\d{9}/g) || [];
+  for (const match of localMatches) {
+    if (/^0\d{9}$/.test(match)) return match;
+  }
+
+  const thaiMatches = digits.match(/66\d{9}/g) || [];
+  for (const match of thaiMatches) {
+    if (/^66\d{9}$/.test(match)) return `0${match.slice(2)}`;
+  }
 
   return "";
 }
 
 function extractPhone(text: string): string {
-  const normalized = normalizeCustomerRawText(text);
+  const normalized = splitPackedThaiCustomerText(text || "");
 
-  const matches = normalized.match(/(?:\+66|66|0)\d{8,9}/g) || [];
-  for (const raw of matches) {
+  const explicitMatches = [
+    ...(normalized.match(/(?:^|[^\d])(\+66\d{9}|66\d{9}|0\d{9})(?!\d)/g) || []),
+  ]
+    .map((item) => item.replace(/[^\d+]/g, ""))
+    .filter(Boolean);
+
+  for (const raw of explicitMatches) {
     const normalizedPhone = normalizePhone(raw);
     if (normalizedPhone) return normalizedPhone;
   }
 
   const compact = normalized.replace(/[^\d+]/g, " ");
-  const compactMatches = compact.match(/(?:\+66|66|0)\d{8,9}/g) || [];
-  for (const raw of compactMatches) {
-    const normalizedPhone = normalizePhone(raw);
+  const tokens = compact
+    .split(/\s+/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+
+  for (const token of tokens) {
+    const normalizedPhone = normalizePhone(token);
     if (normalizedPhone) return normalizedPhone;
   }
 
@@ -1183,13 +1203,23 @@ function extractName(text: string): string {
 
 function splitPackedThaiCustomerText(text: string): string {
   return normalizeCustomerRawText(text || "")
-    .replace(/([ก-๙])((?:\+66|66|0)\d{8,9})/g, "$1 $2")
-    .replace(/((?:\+66|66|0)\d{8,9})([ก-๙])/g, "$1 $2")
+    // แยกรหัสไปรษณีย์ออกจากเบอร์โทรที่ติดกัน
+    .replace(/(\d{5})(0\d{9})(?!\d)/g, "$1 $2")
+    .replace(/(\d{5})(66\d{9})(?!\d)/g, "$1 $2")
+    .replace(/(\d{5})(\+66\d{9})(?!\d)/g, "$1 $2")
+
+    // แยกชื่อ/ที่อยู่/เบอร์ที่พิมพ์ติดกัน
+    .replace(/([ก-๙])((?:\+66|66|0)\d{9})(?!\d)/g, "$1 $2")
+    .replace(/((?:\+66|66|0)\d{9})([ก-๙])/g, "$1 $2")
     .replace(/(\d{5})([ก-๙])/g, "$1 $2")
     .replace(/([ก-๙])(\d{5})/g, "$1 $2")
     .replace(/([ก-๙]{2,})(\d{1,4}\/\d{1,4})/g, "$1 $2")
     .replace(/(\d{1,4}\/\d{1,4})([ก-๙]{2,})/g, "$1 $2")
     .replace(/([ก-๙]{2,})(\d{1,4})(หมู่|ม\.|ม\s)/g, "$1 $2 $3")
+
+    // แยกเลขบ้านที่ติดรหัสไปรษณีย์แบบ 121305
+    .replace(/(\d{1,4})(\d{5})(?!\d)/g, "$1 $2")
+
     .replace(/(\d)(จ\.|จังหวัด|อ\.|อำเภอ|ต\.|ตำบล|เขต|แขวง)/g, "$1 $2")
     .replace(/(\*{2,}\d*|\d*\*{2,})/g, " ")
     .replace(/\s+/g, " ")
