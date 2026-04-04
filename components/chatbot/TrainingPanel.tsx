@@ -266,6 +266,7 @@ export default function TrainingPanel({
 }: TrainingPanelProps) {
   const [botRole, setBotRole] = useState("");
   const [botRules, setBotRules] = useState("");
+  const [enableAiCustomerParse, setEnableAiCustomerParse] = useState(false);
   const [salesStrategy, setSalesStrategy] = useState<SalesStrategy>({
     openingStyle: "",
     showOffersInFirstReply: true,
@@ -304,7 +305,12 @@ export default function TrainingPanel({
     const savedProducts = localStorage.getItem(`chatbotProducts_${safeBotId}`);
     const savedStrategy = localStorage.getItem(`chatbotSalesStrategy_${safeBotId}`);
     const savedConnection = localStorage.getItem(`chatbotConnection_${safeBotId}`);
-
+    const savedEnableAiCustomerParse = localStorage.getItem(
+      `chatbotEnableAiCustomerParse_${safeBotId}`
+    );
+    if (savedEnableAiCustomerParse) {
+      setEnableAiCustomerParse(savedEnableAiCustomerParse === "true");
+    }
     if (savedRole) setBotRole(savedRole);
     if (savedRules) setBotRules(savedRules);
 
@@ -439,6 +445,15 @@ export default function TrainingPanel({
     salesStrategy.enableUrgency,
     salesStrategy.urgencyStyle,
   ]);
+
+  useEffect(() => {
+    if (!isMounted) return;
+    const safeBotId = botId || "default";
+    localStorage.setItem(
+      `chatbotEnableAiCustomerParse_${safeBotId}`,
+      String(enableAiCustomerParse)
+    );
+  }, [isMounted, botId, enableAiCustomerParse]);
 
   function updateSalesStrategy(
     field: keyof SalesStrategy,
@@ -736,7 +751,7 @@ export default function TrainingPanel({
 
   async function handleSave() {
     const safeBotId = botId || "default";
-  
+
     const validationMessage = validateTrainingPayload({
       value,
       botRole,
@@ -744,16 +759,16 @@ export default function TrainingPanel({
       products,
       connection,
     });
-  
+
     if (validationMessage) {
       setSaveMessage(validationMessage);
       return;
     }
-  
+
     try {
       setIsSaving(true);
       setSaveMessage("");
-  
+
       console.log("TRAINING_SAVE_PRODUCTS_DEBUG", products.map((product) => ({
         name: product.name,
         imagesText: product.imagesText,
@@ -788,17 +803,18 @@ export default function TrainingPanel({
           urgencyStyle: value.urgencyStyle,
           exampleReplies: value.exampleReplies,
           forbiddenPhrases: value.forbiddenPhrases,
+          enableAiCustomerParse,
         }),
       });
-  
+
       if (!response.ok) {
         const errorText = await response.text();
         throw new Error(errorText || "save failed");
       }
-  
+
       const result = await response.json();
       console.log("SAVE RESULT:", result);
-  
+
       localStorage.setItem(
         `chatbotConnection_${safeBotId}`,
         JSON.stringify(connection)
@@ -813,9 +829,9 @@ export default function TrainingPanel({
         `chatbotProducts_${safeBotId}`,
         JSON.stringify(products)
       );
-  
+
       updateChatbotConnectionConfig(safeBotId, connection);
-  
+
       updateChatbot(safeBotId, (bot) => ({
         ...bot,
         pageName:
@@ -824,21 +840,26 @@ export default function TrainingPanel({
         description: connection.facebookPageId?.trim()
           ? "เชื่อมเพจแล้ว"
           : "ยังไม่ได้เชื่อมเพจ",
+        enableAiCustomerParse,
+        promptConfig: {
+          ...(bot.promptConfig || {}),
+          enableAiCustomerParse,
+        },
       }));
-  
+
       window.dispatchEvent(new CustomEvent("chatbots-updated"));
-  
+
       setSaveMessage("บันทึกการตั้งค่าบอทแล้ว");
     } catch (error) {
       console.error(error);
       setSaveMessage("บันทึกไม่สำเร็จ ลองใหม่อีกครั้ง");
     } finally {
       setIsSaving(false);
-  
+
       if (saveTimerRef.current) {
         clearTimeout(saveTimerRef.current);
       }
-  
+
       saveTimerRef.current = setTimeout(() => {
         setSaveMessage("");
       }, 2200);
@@ -850,6 +871,35 @@ export default function TrainingPanel({
   return (
     <div className="mx-auto max-w-7xl space-y-6 p-6">
       <div className="rounded-3xl border border-zinc-800 bg-zinc-950 p-6 shadow-[0_10px_40px_rgba(0,0,0,0.22)] space-y-6">
+
+        <div className="rounded-2xl border border-zinc-800 bg-zinc-900/40 p-4">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <div className="text-sm font-semibold text-white">
+                เปิดใช้ AI ช่วยแยกชื่อ / ที่อยู่ / เบอร์โทร
+              </div>
+              <div className="mt-1 text-xs text-zinc-400">
+                ถ้าเปิด ระบบจะให้ AI ช่วยอ่านเคสข้อความติดกันหรือพิมพ์มั่วเพิ่มจาก parser ปกติ
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setEnableAiCustomerParse((prev) => !prev)}
+              className={`relative inline-flex h-7 w-14 items-center rounded-full transition ${enableAiCustomerParse ? "bg-emerald-500" : "bg-zinc-700"
+                }`}
+            >
+              <span
+                className={`inline-block h-6 w-6 transform rounded-full bg-white transition ${enableAiCustomerParse ? "translate-x-7" : "translate-x-1"
+                  }`}
+              />
+            </button>
+          </div>
+
+          <div className="mt-3 text-xs text-zinc-500">
+            สถานะตอนนี้: {enableAiCustomerParse ? "เปิดใช้งาน AI parse" : "ใช้ parser ปกติอย่างเดียว"}
+          </div>
+        </div>
 
         <div>
           <h2 className="text-xl font-semibold tracking-tight text-white">Bot Identity + Brain</h2>

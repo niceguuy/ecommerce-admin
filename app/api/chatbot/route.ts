@@ -4,6 +4,14 @@ import { getChatbotById } from "@/lib/chatbot-store";
 
 const ai = new GoogleGenAI({});
 
+function isAiCustomerParseEnabled(bot: any): boolean {
+  return Boolean(
+    bot?.enableAiCustomerParse ??
+    bot?.promptConfig?.enableAiCustomerParse ??
+    false
+  );
+}
+
 type ProductOffer = {
   id: number;
   title: string;
@@ -699,7 +707,12 @@ function getMissingThaiAddressParts(address: string): string[] {
 }
 
 function removePhoneFromText(text: string): string {
-  return normalizeWhitespace(text.replace(/(?:\+66|66|0)\d{8,9}/g, " "));
+  return normalizeWhitespace(
+    (text || "")
+      .replace(/(?:\+66|66|0)\d{8,9}/g, " ")
+      .replace(/0\d{4}\s\d{5}/g, " ")
+      .replace(/66\d{4}\s\d{5}/g, " ")
+  );
 }
 
 function removeDetectedNameFromAddress(text: string, name: string): string {
@@ -937,7 +950,7 @@ function extractAddress(text: string): string {
     .replace(/([ก-๙])(\d)/g, "$1 $2")
     .replace(/วัฒนานคร(?=วัฒนานคร)/g, "วัฒนานคร ")
     .replace(/วัฒนานคร(?=สระแก้ว)/g, "วัฒนานคร ")
-    .replace(/(\d{5})/g, " $1")
+    .replace(/\b(\d{5})\b/g, " $1 ")
     .replace(/\s+/g, " ")
     .trim();
 
@@ -974,7 +987,7 @@ function extractAddress(text: string): string {
       .replace(/(หมู่|ม)(\d)/g, "$1 $2")
       .replace(/(\d)([ก-๙])/g, "$1 $2")
       .replace(/([ก-๙])(\d)/g, "$1 $2")
-      .replace(/(\d{5})/g, " $1")
+      .replace(/\b(\d{5})\b/g, " $1 ")
       .replace(/วัฒนานคร(?=วัฒนานคร)/g, "วัฒนานคร ")
       .replace(/วัฒนานคร(?=สระแก้ว)/g, "วัฒนานคร ")
       .replace(/\s+/g, " ")
@@ -1215,29 +1228,52 @@ function extractName(text: string): string {
 }
 
 function splitPackedThaiCustomerText(text: string): string {
-  return normalizeCustomerRawText(text || "")
-    // แยกรหัสไปรษณีย์ออกจากเบอร์โทรที่ติดกัน
+  let value = normalizeCustomerRawText(text || "");
+
+  // 1) แยกรหัสไปรษณีย์ที่ติดกับเบอร์โทร เช่น 121300878317075 -> 12130 0878317075
+  value = value
     .replace(/(\d{5})(0\d{9})(?!\d)/g, "$1 $2")
     .replace(/(\d{5})(66\d{9})(?!\d)/g, "$1 $2")
-    .replace(/(\d{5})(\+66\d{9})(?!\d)/g, "$1 $2")
+    .replace(/(\d{5})(\+66\d{9})(?!\d)/g, "$1 $2");
 
-    // แยกชื่อ/ที่อยู่/เบอร์ที่พิมพ์ติดกัน
+  // 2) แยกเบอร์โทรที่ติดกับข้อความไทย
+  value = value
     .replace(/([ก-๙])((?:\+66|66|0)\d{9})(?!\d)/g, "$1 $2")
-    .replace(/((?:\+66|66|0)\d{9})([ก-๙])/g, "$1 $2")
+    .replace(/((?:\+66|66|0)\d{9})([ก-๙])/g, "$1 $2");
+
+  // 3) แยกรหัสไปรษณีย์ที่ติดกับคำไทย
+  value = value
     .replace(/(\d{5})([ก-๙])/g, "$1 $2")
-    .replace(/([ก-๙])(\d{5})/g, "$1 $2")
+    .replace(/([ก-๙])(\d{5})/g, "$1 $2");
+
+  // 4) แยกบ้านเลขที่/หมู่ที่ติดคำไทย
+  value = value
     .replace(/([ก-๙]{2,})(\d{1,4}\/\d{1,4})/g, "$1 $2")
     .replace(/(\d{1,4}\/\d{1,4})([ก-๙]{2,})/g, "$1 $2")
-    .replace(/([ก-๙]{2,})(\d{1,4})(หมู่|ม\.|ม\s)/g, "$1 $2 $3")
+    .replace(/([ก-๙]{2,})(\d{1,4})(หมู่|ม\.|ม\s)/g, "$1 $2 $3");
 
-    // แยกบ้านเลขที่ชนรหัสไปรษณีย์ เช่น 121300 → 12 13000
-    .replace(/(\d{1,4})(\d{5})(?!\d)/g, "$1 $2")
+  // 5) แยกบ้านเลขที่ชนรหัสไปรษณีย์ เฉพาะก้อนตัวเลข 6-9 หลัก
+  // กันไม่ให้ไปผ่าเบอร์โทร 10 หลัก
+  value = value.replace(/\b\d{6,9}\b/g, (chunk) => {
+    if (/^0\d{9}$/.test(chunk)) return chunk;
+    if (/^66\d{9}$/.test(chunk)) return chunk;
+    if (chunk.length <= 5) return chunk;
 
-    // แยกก่อน keyword ที่อยู่
+    const left = chunk.slice(0, chunk.length - 5);
+    const right = chunk.slice(-5);
+
+    if (!left || !right) return chunk;
+    return `${left} ${right}`;
+  });
+
+  // 6) แยกก่อน keyword ที่อยู่
+  value = value
     .replace(/(\d)(จ\.|จังหวัด|อ\.|อำเภอ|ต\.|ตำบล|เขต|แขวง)/g, "$1 $2")
     .replace(/(\*{2,}\d*|\d*\*{2,})/g, " ")
     .replace(/\s+/g, " ")
     .trim();
+
+  return value;
 }
 
 function removeMaskedPhoneGarbage(text: string): string {
@@ -1356,8 +1392,18 @@ function extractCustomerInfoFromText(text: string): ExtractedCustomerInfo {
   return parsed;
 }
 
-async function extractCustomerInfoWithAiFallback(text: string): Promise<ExtractedCustomerInfo> {
+async function extractCustomerInfoWithAiFallback(
+  text: string,
+  options?: {
+    enableAi?: boolean;
+  }
+): Promise<ExtractedCustomerInfo> {
   const ruleBased = extractCustomerInfoFromText(text);
+  const enableAi = Boolean(options?.enableAi);
+
+  if (!enableAi) {
+    return ruleBased;
+  }
 
   if (
     (ruleBased.name && ruleBased.phone && ruleBased.address) ||
@@ -1394,12 +1440,17 @@ ${text}
     const cleaned = raw.replace(/```json|```/g, "").trim();
     const parsed = JSON.parse(cleaned);
 
-    return {
-      name: normalizeWhitespace(parsed.name || ruleBased.name || ""),
-      phone: normalizePhone(parsed.phone || ruleBased.phone || ""),
-      address: normalizeWhitespace(parsed.address || ruleBased.address || ""),
+    const aiParsed: ExtractedCustomerInfo = {
+      name: normalizeWhitespace(parsed?.name || ""),
+      phone: normalizePhone(parsed?.phone || ""),
+      address: normalizeWhitespace(parsed?.address || ""),
       facebookName: "",
     };
+
+    return repairExtractedCustomerInfoFromRawText(
+      text,
+      mergeCustomerInfo(ruleBased, aiParsed)
+    );
   } catch (error) {
     console.error("AI_CUSTOMER_PARSE_FAILED", error);
     return ruleBased;
@@ -1614,7 +1665,10 @@ function mergeCustomerInfo(
 
 async function extractCustomerInfoFromHistory(
   messages: Array<{ role: string; text: string }>,
-  latestMessage: string
+  latestMessage: string,
+  options?: {
+    enableAi?: boolean;
+  }
 ): Promise<ExtractedCustomerInfo> {
   let customerInfo: ExtractedCustomerInfo = {
     name: "",
@@ -1626,26 +1680,16 @@ async function extractCustomerInfoFromHistory(
   for (const msg of messages) {
     if (msg.role !== "user") continue;
 
-    const extracted = await extractCustomerInfoWithAiFallback(msg.text);
-
-    console.log("DEBUG_HISTORY_ITEM_PARSE", {
-      sourceText: msg.text,
-      extracted,
+    const extracted = await extractCustomerInfoWithAiFallback(msg.text, {
+      enableAi: options?.enableAi,
     });
-
     customerInfo = mergeCustomerInfo(customerInfo, extracted);
   }
 
-  const latestExtracted = await extractCustomerInfoWithAiFallback(latestMessage);
-
-  console.log("DEBUG_LATEST_MESSAGE_PARSE", {
-    latestMessage,
-    latestExtracted,
+  const latestExtracted = await extractCustomerInfoWithAiFallback(latestMessage, {
+    enableAi: options?.enableAi,
   });
-
   customerInfo = mergeCustomerInfo(customerInfo, latestExtracted);
-
-  console.log("DEBUG_MERGED_CUSTOMER_INFO", customerInfo);
 
   return customerInfo;
 }
@@ -2937,6 +2981,7 @@ export async function POST(req: Request) {
     const history: ChatHistoryItem[] = Array.isArray(body.history) ? body.history : [];
     const senderName: string = body.senderName || "";
     const chatbot = botId ? await getChatbotById(botId) : null;
+    const enableAiCustomerParse = isAiCustomerParseEnabled(chatbot);
 
     const requestProducts: ProductItem[] = Array.isArray(products) ? products : [];
     const dbProducts: ProductItem[] = Array.isArray((chatbot as any)?.products)

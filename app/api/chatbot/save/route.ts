@@ -26,6 +26,11 @@ export async function POST(req: Request) {
     const botEnabled =
       typeof body.botEnabled === "boolean" ? body.botEnabled : undefined;
     const products = Array.isArray(body.products) ? body.products : [];
+    const enableAiCustomerParse =
+      typeof body.enableAiCustomerParse === "boolean"
+        ? body.enableAiCustomerParse
+        : undefined;
+
     console.log(
       "SAVE_ROUTE_PRODUCTS_DEBUG",
       products.map((product: any) => ({
@@ -39,6 +44,7 @@ export async function POST(req: Request) {
           : [],
       }))
     );
+
     const salesStrategy = body.salesStrategy || null;
     const connection = normalizeConnectionConfig(body.connection);
 
@@ -52,7 +58,7 @@ export async function POST(req: Request) {
     const bots = await getChatbots();
     const existingBot = bots.find((b: any) => b.id === botId);
 
-    let updatedBots;
+    let updatedBots: any[];
 
     if (!existingBot) {
       const newBot = {
@@ -64,6 +70,10 @@ export async function POST(req: Request) {
         revenue: 0,
         description: "",
         botEnabled: typeof botEnabled === "boolean" ? botEnabled : false,
+        enableAiCustomerParse:
+          typeof enableAiCustomerParse === "boolean"
+            ? enableAiCustomerParse
+            : false,
         promptConfig: {
           botName: body.botName?.trim() || "บอทใหม่",
           welcomeMessage:
@@ -77,6 +87,10 @@ export async function POST(req: Request) {
             salesStrategy?.closingQuestionStyle ||
             body.closingQuestionStyle ||
             "",
+          enableAiCustomerParse:
+            typeof enableAiCustomerParse === "boolean"
+              ? enableAiCustomerParse
+              : false,
         },
         connectionConfig: connection,
         products,
@@ -103,8 +117,14 @@ export async function POST(req: Request) {
             connection.facebookPageName?.trim() ||
             body.pageName?.trim() ||
             bot.pageName,
-            botEnabled:
+          botEnabled:
             typeof botEnabled === "boolean" ? botEnabled : bot.botEnabled,
+          enableAiCustomerParse:
+            typeof enableAiCustomerParse === "boolean"
+              ? enableAiCustomerParse
+              : bot.enableAiCustomerParse ??
+                bot.promptConfig?.enableAiCustomerParse ??
+                false,
           promptConfig: {
             ...bot.promptConfig,
             botName: body.botName ?? bot.promptConfig?.botName ?? bot.name,
@@ -129,6 +149,12 @@ export async function POST(req: Request) {
               body.closingQuestionStyle ||
               bot.promptConfig?.closingQuestionStyle ||
               "",
+            enableAiCustomerParse:
+              typeof enableAiCustomerParse === "boolean"
+                ? enableAiCustomerParse
+                : bot.promptConfig?.enableAiCustomerParse ??
+                  bot.enableAiCustomerParse ??
+                  false,
           },
           connectionConfig: {
             ...normalizeConnectionConfig(bot.connectionConfig),
