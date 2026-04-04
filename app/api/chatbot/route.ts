@@ -218,6 +218,122 @@ function normalizeWhitespace(text: string): string {
   return text.replace(/\s+/g, " ").trim();
 }
 
+function injectThaiLocationSpaces(text: string): string {
+  let value = text || "";
+
+  const knownTokens = [
+    "กรุงเทพ",
+    "กทม",
+    "กระบี่",
+    "กาญจนบุรี",
+    "กาฬสินธุ์",
+    "กำแพงเพชร",
+    "ขอนแก่น",
+    "จันทบุรี",
+    "ฉะเชิงเทรา",
+    "ชลบุรี",
+    "ชัยนาท",
+    "ชัยภูมิ",
+    "ชุมพร",
+    "เชียงราย",
+    "เชียงใหม่",
+    "ตรัง",
+    "ตราด",
+    "ตาก",
+    "นครนายก",
+    "นครปฐม",
+    "นครพนม",
+    "นครราชสีมา",
+    "นครศรีธรรมราช",
+    "นครสวรรค์",
+    "นนทบุรี",
+    "นราธิวาส",
+    "น่าน",
+    "บึงกาฬ",
+    "บุรีรัมย์",
+    "ปทุมธานี",
+    "ประจวบคีรีขันธ์",
+    "ปราจีนบุรี",
+    "ปัตตานี",
+    "พระนครศรีอยุธยา",
+    "พะเยา",
+    "พังงา",
+    "พัทลุง",
+    "พิจิตร",
+    "พิษณุโลก",
+    "เพชรบุรี",
+    "เพชรบูรณ์",
+    "แพร่",
+    "ภูเก็ต",
+    "มหาสารคาม",
+    "มุกดาหาร",
+    "แม่ฮ่องสอน",
+    "ยโสธร",
+    "ยะลา",
+    "ร้อยเอ็ด",
+    "ระนอง",
+    "ระยอง",
+    "ราชบุรี",
+    "ลพบุรี",
+    "ลำปาง",
+    "ลำพูน",
+    "เลย",
+    "ศรีสะเกษ",
+    "สกลนคร",
+    "สงขลา",
+    "สตูล",
+    "สมุทรปราการ",
+    "สมุทรสงคราม",
+    "สมุทรสาคร",
+    "สระแก้ว",
+    "สระบุรี",
+    "สิงห์บุรี",
+    "สุโขทัย",
+    "สุพรรณบุรี",
+    "สุราษฎร์ธานี",
+    "สุรินทร์",
+    "หนองคาย",
+    "หนองบัวลำภู",
+    "อ่างทอง",
+    "อุดรธานี",
+    "อุทัยธานี",
+    "อุตรดิตถ์",
+    "อุบลราชธานี",
+    "อำนาจเจริญ",
+
+    "คูคต",
+    "ลำลูกกา",
+    "บางปะหัน",
+    "บางนางร้า",
+    "พบพระ",
+    "รวมไทยพัฒนา",
+    "วัฒนานคร",
+    "ชุมพลบุรี",
+    "พหลโยธิน",
+    "หนองสำราญ",
+    "สระขุด",
+  ];
+
+  for (const token of knownTokens) {
+    const escaped = token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+    value = value
+      .replace(new RegExp(`([ก-๙])(${escaped})`, "g"), "$1 $2")
+      .replace(new RegExp(`(${escaped})([ก-๙])`, "g"), "$1 $2")
+      .replace(new RegExp(`(\\d)(${escaped})`, "g"), "$1 $2")
+      .replace(new RegExp(`(${escaped})(\\d)`, "g"), "$1 $2");
+  }
+
+  return value.replace(/\s+/g, " ").trim();
+}
+
+function looksLikeGovernmentDropPoint(text: string): boolean {
+  const value = normalizeWhitespace(normalizeCustomerRawText(text || ""));
+  return /(อบต\.|องค์การบริหารส่วนตำบล|เทศบาล|โรงเรียน|โรงพยาบาล|รพ\.สต\.|สำนักงาน|บริษัท|ร้าน|อู่|โกดัง)/.test(
+    value
+  );
+}
+
 function normalizeThaiAddressTokens(text: string): string {
   return (text || "")
     .replace(/อบต\./g, "องค์การบริหารส่วนตำบล ")
@@ -740,13 +856,22 @@ function getMissingThaiAddressParts(address: string): string[] {
       value
     );
 
-  const isGovernmentLocation =
-    /(อบต\.|องค์การบริหารส่วนตำบล|เทศบาล|โรงเรียน|โรงพยาบาล|รพ\.สต\.|สำนักงาน|บริษัท|ร้าน|อู่|โกดัง)/.test(
-      value
-    );
+  const isGovernmentLocation = looksLikeGovernmentDropPoint(value);
+  /(อบต\.|องค์การบริหารส่วนตำบล|เทศบาล|โรงเรียน|โรงพยาบาล|รพ\.สต\.|สำนักงาน|บริษัท|ร้าน|อู่|โกดัง)/.test(
+    value
+  );
 
   // ถ้าเป็นหน่วยงาน/จุดรับของเฉพาะ และพอส่งได้แล้ว → ไม่ต้องถือว่าขาด
-  if (isGovernmentLocation && hasProvince && (hasZipCode || hasDistrict || hasSubdistrict)) {
+  if (
+    isGovernmentLocation &&
+    hasProvince &&
+    (
+      hasZipCode ||
+      hasDistrict ||
+      hasSubdistrict ||
+      /(องค์การบริหารส่วนตำบล|เทศบาล|โรงเรียน|โรงพยาบาล|สำนักงาน|บริษัท|ร้าน|อู่|โกดัง)/.test(value)
+    )
+  ) {
     return [];
   }
 
@@ -951,6 +1076,11 @@ function removeNamePrefixFromText(text: string, name: string): string {
 
 function extractAddress(text: string): string {
   const normalizedInput = cleanupThaiAddressNoise(normalizeCustomerRawText(text));
+  const rawGovernmentPrefixMatch = normalizedInput.match(
+    /(องค์การบริหารส่วนตำบล\s*[ก-๙]+|เทศบาล(?:ตำบล|เมือง|นคร)?\s*[ก-๙]+|โรงเรียน\s*[ก-๙]+|โรงพยาบาล\s*[ก-๙]+|สำนักงาน\s*[ก-๙]+|บริษัท\s*[ก-๙]+|ร้าน\s*[ก-๙]+)/i
+  );
+  const rawGovernmentPrefix = rawGovernmentPrefixMatch?.[0]?.trim() || "";
+
   let detectedName = "";
 
   const lines = splitLines(normalizedInput);
@@ -969,9 +1099,9 @@ function extractAddress(text: string): string {
 
   const safeDetectedName =
     detectedName &&
-    !looksLikeAddress(detectedName) &&
-    !looksLikePhone(detectedName) &&
-    looksLikeNameValue(detectedName)
+      !looksLikeAddress(detectedName) &&
+      !looksLikePhone(detectedName) &&
+      looksLikeNameValue(detectedName)
       ? detectedName
       : "";
 
@@ -984,6 +1114,10 @@ function extractAddress(text: string): string {
   cleaned = removeMaskedPhoneGarbage(cleaned);
   cleaned = normalizeThaiAddressTokens(cleaned);
   cleaned = normalizeWhitespace(cleaned);
+
+  if (rawGovernmentPrefix && !cleaned.includes(rawGovernmentPrefix)) {
+    cleaned = `${rawGovernmentPrefix} ${cleaned}`.trim();
+  }
 
   if (safeDetectedName) {
     cleaned = removeDetectedNameFromAddress(cleaned, safeDetectedName);
@@ -1024,6 +1158,17 @@ function extractAddress(text: string): string {
     candidate = cleanupThaiAddressNoise(candidate);
     candidate = normalizeThaiAddressTokens(candidate);
     candidate = normalizeWhitespace(candidate);
+
+    if (rawGovernmentPrefix && !candidate.includes(rawGovernmentPrefix)) {
+      const hasGovTail =
+        /(อ\.|อำเภอ|จ\.|จังหวัด|\b\d{5}\b|พบพระ|ตาก|สระแก้ว|ปทุมธานี|สุรินทร์)/i.test(
+          candidate
+        );
+
+      if (hasGovTail) {
+        candidate = `${rawGovernmentPrefix} ${candidate}`.trim();
+      }
+    }
 
     const index = findThaiAddressStartIndex(candidate);
     if (index > 0) {
@@ -1079,7 +1224,6 @@ function normalizeCustomerRawText(text: string): string {
 
   value = value
     .replace(/[_|]+/g, " ")
-    .replace(/[-]+/g, " ")
     .replace(/[,:;]+/g, " ")
     .replace(/([ก-๙])(\d)/g, "$1 $2")
     .replace(/(\d)([ก-๙])/g, "$1 $2")
@@ -1103,6 +1247,8 @@ function normalizeCustomerRawText(text: string): string {
     .replace(/กทม\./g, "กทม")
     .replace(/\s+/g, " ")
     .trim();
+
+  value = injectThaiLocationSpaces(value);
 
   return value;
 }
@@ -1917,8 +2063,8 @@ function hasCompleteCustomerInfo(
   const hasRealName = Boolean(realName && !isLowConfidenceName(realName));
   const hasFallbackFacebookName = Boolean(
     options?.allowFacebookName &&
-      facebookName &&
-      !isLowConfidenceName(facebookName)
+    facebookName &&
+    !isLowConfidenceName(facebookName)
   );
 
   const hasAnyUsableName = hasRealName || hasFallbackFacebookName;
@@ -2380,16 +2526,16 @@ function buildOrderSummaryText(params: {
 
   const safeName = normalizeWhitespace(
     customerInfo.name ||
-      customerInfo.facebookName ||
-      ""
+    customerInfo.facebookName ||
+    ""
   );
-  
+
   let safeAddress = normalizeWhitespace(customerInfo.address || "");
-  
+
   if (safeName) {
     safeAddress = removeDetectedNameFromAddress(safeAddress, safeName);
   }
-  
+
   safeAddress = trimTrailingNameFromAddress(safeAddress);
   safeAddress = normalizeWhitespace(safeAddress);
 
@@ -3665,7 +3811,7 @@ export async function POST(req: Request) {
         /\b\d{5}\b/.test(safeMessage) ||
         /\d{9,10}/.test(safeMessage) ||
         /(หมู่|ม\.|ต\.|ตำบล|อ\.|อำเภอ|จ\.|จังหวัด|ซอย|ถนน|บ้านเลขที่|เลขที่|แขวง|เขต)/.test(safeMessage);
-    
+
       if (
         hasBotRecentlyAskedForSameMissingFields(history, missingFields) &&
         !messageLooksLikeNewCustomerData &&
@@ -3676,12 +3822,12 @@ export async function POST(req: Request) {
           images: [],
         });
       }
-    
+
       // วางก้อนนี้เพิ่มตรงนี้
       const normalizedAddressForFallback = normalizeThaiAddressForCheck(
         finalCustomerInfo.address || ""
       );
-    
+
       const fallbackSummaryReady =
         Boolean((finalCustomerInfo.name || finalCustomerInfo.facebookName) && finalCustomerInfo.phone) &&
         hasHouseNumberLike(normalizedAddressForFallback) &&
@@ -3693,27 +3839,27 @@ export async function POST(req: Request) {
           hasRepeatedThaiLocationWord(normalizedAddressForFallback) ||
           /\b\d{5}\b/.test(normalizedAddressForFallback)
         );
-    
+
       if (fallbackSummaryReady && !hasSummarizedBefore) {
         const reply = buildOrderSummaryText({
           product: selectedProduct,
           offer: finalOffer,
           customerInfo: finalCustomerInfo,
         });
-    
+
         return NextResponse.json({
           reply,
           images: [],
         });
       }
-    
+
       const reply = buildNeedMoreInfoReply({
         product: selectedProduct,
         offer: finalOffer,
         missingFields,
         customerInfo: finalCustomerInfo,
       });
-    
+
       return NextResponse.json({
         reply,
         images: [],
