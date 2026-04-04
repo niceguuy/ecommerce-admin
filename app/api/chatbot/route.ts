@@ -218,6 +218,41 @@ function normalizeWhitespace(text: string): string {
   return text.replace(/\s+/g, " ").trim();
 }
 
+function stripLeadingProvinceOnlyAddress(text: string): string {
+  const value = normalizeWhitespace(text || "");
+  if (!value) return "";
+
+  // กันเคส address เหลือแค่ "ปทุมธานี 12130" หรือ "ตาก 63160"
+  if (
+    /^(กรุงเทพ|กทม|กระบี่|กาญจนบุรี|กาฬสินธุ์|กำแพงเพชร|ขอนแก่น|จันทบุรี|ฉะเชิงเทรา|ชลบุรี|ชัยนาท|ชัยภูมิ|ชุมพร|เชียงราย|เชียงใหม่|ตรัง|ตราด|ตาก|นครนายก|นครปฐม|นครพนม|นครราชสีมา|นครศรีธรรมราช|นครสวรรค์|นนทบุรี|นราธิวาส|น่าน|บึงกาฬ|บุรีรัมย์|ปทุมธานี|ประจวบคีรีขันธ์|ปราจีนบุรี|ปัตตานี|พระนครศรีอยุธยา|พะเยา|พังงา|พัทลุง|พิจิตร|พิษณุโลก|เพชรบุรี|เพชรบูรณ์|แพร่|ภูเก็ต|มหาสารคาม|มุกดาหาร|แม่ฮ่องสอน|ยโสธร|ยะลา|ร้อยเอ็ด|ระนอง|ระยอง|ราชบุรี|ลพบุรี|ลำปาง|ลำพูน|เลย|ศรีสะเกษ|สกลนคร|สงขลา|สตูล|สมุทรปราการ|สมุทรสงคราม|สมุทรสาคร|สระแก้ว|สระบุรี|สิงห์บุรี|สุโขทัย|สุพรรณบุรี|สุราษฎร์ธานี|สุรินทร์|หนองคาย|หนองบัวลำภู|อ่างทอง|อุดรธานี|อุทัยธานี|อุตรดิตถ์|อุบลราชธานี|อำนาจเจริญ)\s+\d{5}$/.test(
+      value
+    )
+  ) {
+    return "";
+  }
+
+  return value;
+}
+
+function extractGovernmentPrefix(text: string): string {
+  const value = normalizeWhitespace(text || "");
+
+  const match = value.match(
+    /(องค์การบริหารส่วนตำบล\s*[ก-๙]+|เทศบาล(?:ตำบล|เมือง|นคร)?\s*[ก-๙]+|โรงเรียน\s*[ก-๙]+|โรงพยาบาล\s*[ก-๙]+|สำนักงาน\s*[ก-๙]+|บริษัท\s*[ก-๙]+|ร้าน\s*[ก-๙]+|อู่\s*[ก-๙]+)/i
+  );
+
+  return match?.[0]?.trim() || "";
+}
+
+function cleanupPackedCustomerTextForAddress(text: string): string {
+  return normalizeWhitespace(
+    normalizeCustomerRawText(text || "")
+      .replace(/โทร\.?/g, " ")
+      .replace(/เบอร์โทร\.?/g, " ")
+      .replace(/เบอร์\.?/g, " ")
+  );
+}
+
 function injectThaiLocationSpaces(text: string): string {
   let value = text || "";
 
@@ -864,13 +899,9 @@ function getMissingThaiAddressParts(address: string): string[] {
   // ถ้าเป็นหน่วยงาน/จุดรับของเฉพาะ และพอส่งได้แล้ว → ไม่ต้องถือว่าขาด
   if (
     isGovernmentLocation &&
+    /(องค์การบริหารส่วนตำบล|เทศบาล|โรงเรียน|โรงพยาบาล|สำนักงาน|บริษัท|ร้าน|อู่|โกดัง)/.test(value) &&
     hasProvince &&
-    (
-      hasZipCode ||
-      hasDistrict ||
-      hasSubdistrict ||
-      /(องค์การบริหารส่วนตำบล|เทศบาล|โรงเรียน|โรงพยาบาล|สำนักงาน|บริษัท|ร้าน|อู่|โกดัง)/.test(value)
-    )
+    (hasZipCode || hasDistrict || hasSubdistrict)
   ) {
     return [];
   }
@@ -1075,11 +1106,8 @@ function removeNamePrefixFromText(text: string, name: string): string {
 }
 
 function extractAddress(text: string): string {
-  const normalizedInput = cleanupThaiAddressNoise(normalizeCustomerRawText(text));
-  const rawGovernmentPrefixMatch = normalizedInput.match(
-    /(องค์การบริหารส่วนตำบล\s*[ก-๙]+|เทศบาล(?:ตำบล|เมือง|นคร)?\s*[ก-๙]+|โรงเรียน\s*[ก-๙]+|โรงพยาบาล\s*[ก-๙]+|สำนักงาน\s*[ก-๙]+|บริษัท\s*[ก-๙]+|ร้าน\s*[ก-๙]+)/i
-  );
-  const rawGovernmentPrefix = rawGovernmentPrefixMatch?.[0]?.trim() || "";
+  const normalizedInput = cleanupPackedCustomerTextForAddress(text);
+  const rawGovernmentPrefix = extractGovernmentPrefix(normalizedInput);
 
   let detectedName = "";
 
@@ -1099,9 +1127,9 @@ function extractAddress(text: string): string {
 
   const safeDetectedName =
     detectedName &&
-      !looksLikeAddress(detectedName) &&
-      !looksLikePhone(detectedName) &&
-      looksLikeNameValue(detectedName)
+    !looksLikeAddress(detectedName) &&
+    !looksLikePhone(detectedName) &&
+    looksLikeNameValue(detectedName)
       ? detectedName
       : "";
 
@@ -1114,15 +1142,6 @@ function extractAddress(text: string): string {
   cleaned = removeMaskedPhoneGarbage(cleaned);
   cleaned = normalizeThaiAddressTokens(cleaned);
   cleaned = normalizeWhitespace(cleaned);
-
-  if (rawGovernmentPrefix && !cleaned.includes(rawGovernmentPrefix)) {
-    cleaned = `${rawGovernmentPrefix} ${cleaned}`.trim();
-  }
-
-  if (safeDetectedName) {
-    cleaned = removeDetectedNameFromAddress(cleaned, safeDetectedName);
-    cleaned = normalizeWhitespace(cleaned);
-  }
 
   const firstAddressIndex = findThaiAddressStartIndex(cleaned);
   if (firstAddressIndex > 0) {
@@ -1138,7 +1157,21 @@ function extractAddress(text: string): string {
     .replace(/\s+/g, " ")
     .trim();
 
+  cleaned = stripLeadingProvinceOnlyAddress(cleaned);
+
+  if (rawGovernmentPrefix) {
+    const hasGovTail =
+      /(อ\.|อำเภอ|จ\.|จังหวัด|\b\d{5}\b|พบพระ|ตาก|ปทุมธานี|สระแก้ว|สุรินทร์|ลำลูกกา|คูคต)/i.test(
+        cleaned
+      );
+
+    if (hasGovTail && !cleaned.includes(rawGovernmentPrefix)) {
+      cleaned = `${rawGovernmentPrefix} ${cleaned}`.trim();
+    }
+  }
+
   cleaned = trimTrailingNameFromAddress(cleaned);
+  cleaned = normalizeWhitespace(cleaned);
 
   if (looksLikeAddress(cleaned)) {
     return cleaned;
@@ -1148,27 +1181,16 @@ function extractAddress(text: string): string {
   let bestScore = 0;
 
   for (const line of lines) {
-    let candidate = line;
+    let candidate = cleanupPackedCustomerTextForAddress(line);
 
     candidate = removeCommonOrderWords(candidate);
     candidate = stripOfferNoise(candidate);
     candidate = removeNamePrefixFromText(candidate, safeDetectedName);
     candidate = removePhoneFromText(candidate);
     candidate = removeMaskedPhoneGarbage(candidate);
-    candidate = cleanupThaiAddressNoise(candidate);
-    candidate = normalizeThaiAddressTokens(candidate);
     candidate = normalizeWhitespace(candidate);
 
-    if (rawGovernmentPrefix && !candidate.includes(rawGovernmentPrefix)) {
-      const hasGovTail =
-        /(อ\.|อำเภอ|จ\.|จังหวัด|\b\d{5}\b|พบพระ|ตาก|สระแก้ว|ปทุมธานี|สุรินทร์)/i.test(
-          candidate
-        );
-
-      if (hasGovTail) {
-        candidate = `${rawGovernmentPrefix} ${candidate}`.trim();
-      }
-    }
+    const govPrefix = extractGovernmentPrefix(candidate) || rawGovernmentPrefix;
 
     const index = findThaiAddressStartIndex(candidate);
     if (index > 0) {
@@ -1184,15 +1206,28 @@ function extractAddress(text: string): string {
       .replace(/\s+/g, " ")
       .trim();
 
+    candidate = stripLeadingProvinceOnlyAddress(candidate);
+
+    if (govPrefix) {
+      const hasGovTail =
+        /(อ\.|อำเภอ|จ\.|จังหวัด|\b\d{5}\b|พบพระ|ตาก|ปทุมธานี|สระแก้ว|สุรินทร์|ลำลูกกา|คูคต)/i.test(
+          candidate
+        );
+
+      if (hasGovTail && !candidate.includes(govPrefix)) {
+        candidate = `${govPrefix} ${candidate}`.trim();
+      }
+    }
+
     let score = 0;
 
-    if (/\b\d{1,4}(\/\d{1,4})?\b/.test(candidate)) score += 3;
-    if (/(หมู่|ม\.|ม\s+\d+|ซอย|ถนน|บ้านเลขที่|เลขที่)/i.test(candidate)) score += 3;
-    if (/(ต\.|ตำบล|แขวง|ห้วยโจด|ท่าเกษม|บ้านแก้ง|หนองน้ำใส|คลองหาด|คูคต|ละหาร|สระขุด|รวมไทยพัฒนา)/i.test(candidate)) score += 2;
-    if (/(อ\.|อำเภอ|เขต|เมือง|วัฒนานคร|อรัญประเทศ|กบินทร์บุรี|พบพระ|ลำลูกกา|ชุมพลบุรี|ละหานทราย)/i.test(candidate)) score += 2;
-    if (/(จ\.|จังหวัด|กรุงเทพ|กทม|สระแก้ว|ตาก|ปทุมธานี|สุรินทร์|นครราชสีมา|บุรีรัมย์)/i.test(candidate)) score += 2;
+    if (/\b\d{1,4}(\/\d{1,4})?\b/.test(candidate)) score += 4;
+    if (/(หมู่|ม\.|ม\s+\d+|ซอย|ถนน|บ้านเลขที่|เลขที่|พหลโยธิน)/i.test(candidate)) score += 4;
+    if (/(ต\.|ตำบล|แขวง|คูคต|รวมไทยพัฒนา|บางนางร้า|ห้วยโจด|ท่าเกษม|บ้านแก้ง|หนองน้ำใส|คลองหาด)/i.test(candidate)) score += 3;
+    if (/(อ\.|อำเภอ|เขต|เมือง|วัฒนานคร|อรัญประเทศ|กบินทร์บุรี|พบพระ|ลำลูกกา|ชุมพลบุรี|บางปะหัน)/i.test(candidate)) score += 3;
+    if (/(จ\.|จังหวัด|กรุงเทพ|กทม|สระแก้ว|ตาก|ปทุมธานี|สุรินทร์|อยุธยา)/i.test(candidate)) score += 3;
     if (/\b\d{5}\b/.test(candidate)) score += 2;
-    if (/(องค์การบริหารส่วนตำบล|เทศบาล|โรงเรียน|โรงพยาบาล|สำนักงาน|บริษัท|ร้าน|อู่|โกดัง)/i.test(candidate)) score += 2;
+    if (/(องค์การบริหารส่วนตำบล|เทศบาล|โรงเรียน|โรงพยาบาล|สำนักงาน|บริษัท|ร้าน|อู่|โกดัง)/i.test(candidate)) score += 3;
     if (looksLikeAddress(candidate)) score += 4;
 
     if (score > bestScore) {
@@ -1201,16 +1236,8 @@ function extractAddress(text: string): string {
     }
   }
 
-  if (bestCandidate && bestScore >= 3) {
-    return bestCandidate;
-  }
-
-  const wholeTextFallback =
-    /\b\d{1,4}(\/\d{1,4})?\b/.test(cleaned) ||
-    /(หมู่|ม\.|ซอย|ถนน|ต\.|ตำบล|อ\.|อำเภอ|จ\.|จังหวัด|แขวง|เขต|กรุงเทพ|กทม|วัฒนานคร|สระแก้ว|องค์การบริหารส่วนตำบล|เทศบาล)/i.test(cleaned);
-
-  if (wholeTextFallback && cleaned.length >= 4) {
-    return cleaned;
+  if (bestCandidate && bestScore >= 4) {
+    return normalizeWhitespace(bestCandidate);
   }
 
   return "";
@@ -1304,6 +1331,11 @@ function cleanPossibleNameLine(line: string): string {
 
   value = removeCommonOrderWords(value);
   value = stripOfferNoise(value);
+
+  const govPrefix = extractGovernmentPrefix(value);
+  if (govPrefix) {
+    value = value.replace(govPrefix, " ");
+  }
 
   const addressIndex = findThaiAddressStartIndex(value);
   if (addressIndex > 0) {
@@ -1496,6 +1528,11 @@ function pickPackedNameCandidate(
   working = stripOfferNoise(working);
   working = normalizeWhitespace(working);
 
+  const govPrefix = extractGovernmentPrefix(working);
+  if (govPrefix) {
+    working = working.replace(govPrefix, " ");
+  }
+
   const firstAddressIndex = findThaiAddressStartIndex(working);
   if (firstAddressIndex > 0) {
     working = working.slice(0, firstAddressIndex);
@@ -1505,6 +1542,10 @@ function pickPackedNameCandidate(
 
   if (looksLikeNameValue(candidate)) {
     return candidate;
+  }
+
+  if (/(\d{1,4}\/\d{1,4}|\b\d{5}\b|พหลโยธิน|คูคต|ลำลูกกา|ปทุมธานี|ตาก|พบพระ)/i.test(candidate)) {
+    return currentName || "";
   }
 
   return currentName || "";
