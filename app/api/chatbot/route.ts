@@ -1592,7 +1592,25 @@ function pickPackedNameCandidate(
   working = normalizeWhitespace(working);
 
   const govPrefix = extractGovernmentPrefix(working);
+
+  // เคสหน่วยงาน เช่น "เทิดศักดิ์ (กองช่าง) อบต.รวมไทยพัฒนา ..."
+  // ให้ตัดชื่อจาก "ข้อความก่อนชื่อหน่วยงาน" ก่อน
   if (govPrefix) {
+    const beforeGovPrefix = normalizeWhitespace(
+      working.slice(0, working.indexOf(govPrefix))
+    );
+
+    const beforeGovCandidate = cleanPossibleNameLine(beforeGovPrefix);
+
+    if (
+      beforeGovCandidate &&
+      looksLikeNameValue(beforeGovCandidate) &&
+      !looksLikeAddress(beforeGovCandidate) &&
+      !looksLikePhone(beforeGovCandidate)
+    ) {
+      return beforeGovCandidate;
+    }
+
     working = working.replace(govPrefix, " ");
   }
 
@@ -1603,20 +1621,14 @@ function pickPackedNameCandidate(
 
   const candidate = cleanPossibleNameLine(working);
 
-  const strippedCandidate = normalizeWhitespace(
-    candidate.replace(
-      /\b(องค์การบริหารส่วนตำบล|องค์การบริหารส่วนจังหวัด|เทศบาลตำบล|เทศบาลเมือง|เทศบาลนคร|อบต\.?|อบจ\.?|โรงเรียน|โรงพยาบาล|สำนักงาน|บริษัท|ร้าน|อู่|โกดัง)\b.*$/i,
-      ""
-    )
-  );
-
   if (
-    strippedCandidate &&
-    !looksLikeAddress(strippedCandidate) &&
-    !/(\d{1,4}\/\d{1,4}|\b\d{5}\b|พหลโยธิน|คูคต|ลาดลูกกา|ลำลูกกา|ปทุมธานี|อยุธยา|พระนครศรีอยุธยา|ตาก|พบพระ|สุรินทร์|สระแก้ว|วัฒนานคร|บางนางร้า|บางปะหัน|ชุมพลบุรี|สระขุด)/i.test(strippedCandidate) &&
-    looksLikeNameValue(strippedCandidate)
+    candidate &&
+    looksLikeNameValue(candidate) &&
+    !looksLikeAddress(candidate) &&
+    !looksLikePhone(candidate) &&
+    !/(\d{1,4}\/\d{1,4}|\b\d{5}\b|พหลโยธิน|คูคต|ลาดลูกกา|ลำลูกกา|ปทุมธานี|อยุธยา|พระนครศรีอยุธยา|ตาก|พบพระ|สุรินทร์|สระแก้ว|วัฒนานคร|บางนางร้า|บางปะหัน|ชุมพลบุรี|สระขุด)/i.test(candidate)
   ) {
-    return strippedCandidate;
+    return candidate;
   }
 
   return currentName || "";
@@ -1638,13 +1650,31 @@ function repairExtractedCustomerInfoFromRawText(
   repairedAddress = removeMaskedPhoneGarbage(repairedAddress);
   repairedAddress = normalizeWhitespace(repairedAddress);
 
-  let repairedName = info.name || "";
-  repairedName = pickPackedNameCandidate(
+  const originalName = normalizeWhitespace(info.name || "");
+
+  const nameLooksBroken =
+    !originalName ||
+    looksLikeAddress(originalName) ||
+    looksLikePhone(originalName) ||
+    /(องค์การบริหารส่วนตำบล|เทศบาล|โรงเรียน|โรงพยาบาล|สำนักงาน|บริษัท|ร้าน|อู่|โกดัง)/i.test(originalName);
+
+  let repairedName = nameLooksBroken ? "" : originalName;
+
+  const packedNameCandidate = pickPackedNameCandidate(
     normalizedRaw,
     repairedAddress,
     repairedPhone,
     repairedName
   );
+
+  if (
+    packedNameCandidate &&
+    looksLikeNameValue(packedNameCandidate) &&
+    !looksLikeAddress(packedNameCandidate) &&
+    !looksLikePhone(packedNameCandidate)
+  ) {
+    repairedName = packedNameCandidate;
+  }
 
   if (repairedName && looksLikeAddress(repairedName)) {
     repairedName = "";
@@ -3146,6 +3176,29 @@ function isCompleteThaiDeliveryAddress(text: string): boolean {
   const hasProvince = hasThaiProvince(value);
   const hasZip = /\b\d{5}\b/.test(value);
 
+  const governmentDropPointReady =
+  looksLikeGovernmentDropPoint(value) &&
+  hasProvince &&
+  (hasDistrict || hasSubdistrict || hasZip);
+
+if (governmentDropPointReady) {
+  console.log("ADDRESS_COMPLETENESS_DEBUG", {
+    originalText: text,
+    value,
+    hasHouse,
+    hasSubdistrict,
+    hasDistrict,
+    hasProvince,
+    hasZip,
+    bangkokStyle: false,
+    regionalStrong: false,
+    regionalFlexible: false,
+    governmentDropPointReady: true,
+  });
+
+  return true;
+}
+
   const bangkokStyle =
     /(กรุงเทพ|กทม)/.test(value) &&
     /(เขต)/.test(value) &&
@@ -3214,22 +3267,16 @@ function getMissingAddressParts(text: string): string[] {
 }
 
 function hasEnoughInfoForCodSummary(customerInfo: ExtractedCustomerInfo): boolean {
-  const phone = (customerInfo.phone || "").trim();
-  const address = (customerInfo.address || "").trim();
-  const name = (customerInfo.name || "").trim();
-  const facebookName = (customerInfo.facebookName || "").trim();
-
-  const usableName = normalizeWhitespace(name || facebookName || "");
-  const usablePhone = normalizePhone(phone || "");
-  const usableAddress = normalizeWhitespace(address || "");
+  const phone = normalizePhone(customerInfo.phone || "");
+  const name = normalizeWhitespace(
+    customerInfo.name || customerInfo.facebookName || ""
+  );
+  const address = normalizeWhitespace(customerInfo.address || "");
 
   return Boolean(
-    usablePhone &&
-    usableName &&
-    (
-      isCompleteThaiDeliveryAddress(usableAddress) ||
-      getMissingAddressParts(usableAddress).length === 0
-    )
+    phone &&
+    name &&
+    hasEnoughThaiAddressForCOD(address)
   );
 }
 
