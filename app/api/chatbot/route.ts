@@ -4,6 +4,14 @@ import { getChatbotById } from "@/lib/chatbot-store";
 
 const ai = new GoogleGenAI({});
 
+function isAiCustomerParseEnabled(bot: any): boolean {
+  return Boolean(
+    bot?.enableAiCustomerParse ??
+    bot?.promptConfig?.enableAiCustomerParse ??
+    false
+  );
+}
+
 type ProductOffer = {
   id: number;
   title: string;
@@ -1385,9 +1393,68 @@ function extractCustomerInfoFromText(text: string): ExtractedCustomerInfo {
 }
 
 async function extractCustomerInfoWithAiFallback(
-  text: string
+  text: string,
+  options?: {
+    enableAi?: boolean;
+  }
 ): Promise<ExtractedCustomerInfo> {
-  return extractCustomerInfoFromText(text);
+  const ruleBased = extractCustomerInfoFromText(text);
+  const enableAi = Boolean(options?.enableAi);
+
+  if (!enableAi) {
+    return ruleBased;
+  }
+
+  if (
+    (ruleBased.name && ruleBased.phone && ruleBased.address) ||
+    text.trim().length < 6
+  ) {
+    return ruleBased;
+  }
+
+  try {
+    const prompt = `
+แยกข้อมูลลูกค้าจากข้อความไทยนี้ให้ออกเป็น JSON เท่านั้น:
+{
+  "name": "",
+  "phone": "",
+  "address": ""
+}
+
+กติกา:
+- phone ต้องเป็นเบอร์ไทย 10 หลักถ้ามี
+- address ให้รวมบ้านเลขที่ หมู่ ตำบล อำเภอ จังหวัด รหัสไปรษณีย์เท่าที่หาได้
+- ถ้าไม่แน่ใจให้เว้นค่าว่าง
+- ห้ามตอบอย่างอื่นนอกจาก JSON
+
+ข้อความ:
+${text}
+`;
+
+    const response = await ai.models.generateContent({
+      model: "gemini-2.0-flash",
+      contents: prompt,
+    });
+
+    const raw = response.text || "";
+    const cleaned = raw.replace(/```json|```/g, "").trim();
+    const parsed = JSON.parse(cleaned);
+
+    const aiParsed: ExtractedCustomerInfo = {
+      name: normalizeWhitespace(parsed?.name || ""),
+      phone: normalizePhone(parsed?.phone || ""),
+      address: normalizeWhitespace(parsed?.address || ""),
+      facebookName: "",
+    };
+
+    return repairExtractedCustomerInfoFromRawText(
+      text,
+      mergeCustomerInfo(ruleBased, aiParsed)
+    );
+  } catch (error) {
+    console.error("AI_CUSTOMER_PARSE_FAILED", error);
+    return ruleBased;
+  }
 }
 
 function detectConversationState(messages: Array<{ role: string; text: string }>): ConversationState {
@@ -1598,7 +1665,10 @@ function mergeCustomerInfo(
 
 async function extractCustomerInfoFromHistory(
   messages: Array<{ role: string; text: string }>,
-  latestMessage: string
+  latestMessage: string,
+  options?: {
+    enableAi?: boolean;
+  }
 ): Promise<ExtractedCustomerInfo> {
   let customerInfo: ExtractedCustomerInfo = {
     name: "",
@@ -1610,26 +1680,16 @@ async function extractCustomerInfoFromHistory(
   for (const msg of messages) {
     if (msg.role !== "user") continue;
 
-    const extracted = await extractCustomerInfoWithAiFallback(msg.text);
-
-    console.log("DEBUG_HISTORY_ITEM_PARSE", {
-      sourceText: msg.text,
-      extracted,
+    const extracted = await extractCustomerInfoWithAiFallback(msg.text, {
+      enableAi: options?.enableAi,
     });
-
     customerInfo = mergeCustomerInfo(customerInfo, extracted);
   }
 
-  const latestExtracted = await extractCustomerInfoWithAiFallback(latestMessage);
-
-  console.log("DEBUG_LATEST_MESSAGE_PARSE", {
-    latestMessage,
-    latestExtracted,
+  const latestExtracted = await extractCustomerInfoWithAiFallback(latestMessage, {
+    enableAi: options?.enableAi,
   });
-
   customerInfo = mergeCustomerInfo(customerInfo, latestExtracted);
-
-  console.log("DEBUG_MERGED_CUSTOMER_INFO", customerInfo);
 
   return customerInfo;
 }
@@ -2921,6 +2981,7 @@ export async function POST(req: Request) {
     const history: ChatHistoryItem[] = Array.isArray(body.history) ? body.history : [];
     const senderName: string = body.senderName || "";
     const chatbot = botId ? await getChatbotById(botId) : null;
+    const enableAiCustomerParse = isAiCustomerParseEnabled(chatbot);
 
     const requestProducts: ProductItem[] = Array.isArray(products) ? products : [];
     const dbProducts: ProductItem[] = Array.isArray((chatbot as any)?.products)
