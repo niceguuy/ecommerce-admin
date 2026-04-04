@@ -1449,6 +1449,53 @@ function sanitizeExtractedName(text: string): string {
   );
 }
 
+function stripGovernmentSuffixFromName(name: string): string {
+  let value = normalizeWhitespace(name || "");
+  if (!value) return "";
+
+  value = value
+    .replace(
+      /\s+(องค์การบริหารส่วนตำบล|องค์การบริหารส่วนจังหวัด|เทศบาลตำบล|เทศบาลเมือง|เทศบาลนคร|โรงเรียน|โรงพยาบาล|สำนักงาน|บริษัท|ร้าน|อู่|โกดัง)\b.*$/i,
+      ""
+    )
+    .replace(
+      /\s+(อบต\.?|อบจ\.?|เทศบาล|โรงเรียน|โรงพยาบาล|สำนักงาน|บริษัท|ร้าน|อู่|โกดัง)\b.*$/i,
+      ""
+    )
+    .replace(/\b(โทร|โทรศัพท์|เบอร์|เบอร์โทร)\b\.?$/gi, "")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  return value;
+}
+
+function sanitizeSummaryName(params: {
+  rawName: string;
+  rawAddress: string;
+  facebookName: string;
+}): string {
+  const rawName = normalizeWhitespace(params.rawName || "");
+  const rawAddress = normalizeWhitespace(params.rawAddress || "");
+  const facebookName = normalizeWhitespace(params.facebookName || "");
+
+  let safeName = stripGovernmentSuffixFromName(rawName);
+
+  if (rawAddress && safeName) {
+    safeName = stripGovernmentSuffixFromName(
+      removeDetectedNameFromAddress(safeName, rawAddress)
+    );
+  }
+
+  safeName = sanitizeExtractedName(safeName);
+  safeName = normalizeWhitespace(safeName);
+
+  if (looksLikeAddress(safeName) || looksLikePhone(safeName) || isLowConfidenceName(safeName)) {
+    return facebookName || "";
+  }
+
+  return safeName || facebookName || "";
+}
+
 function extractName(text: string): string {
   const normalizedInput = normalizeCustomerRawText(text);
   const lines = splitLines(normalizedInput);
@@ -1556,7 +1603,7 @@ function splitPackedThaiCustomerText(text: string): string {
     .replace(/(\*{2,}\d*|\d*\*{2,})/g, " ")
     .replace(/\s+/g, " ")
     .replace(/([ก-๙]{2,})(\d{1,4})(พหลโยธิน)/g, "$1 $2 $3")
-    .replace(/(ต|อ|จ)([ก-๙]{2,})/g, "$1 $2")
+    .replace(/(^|\s)(ต|อ|จ)\s*(?=[ก-๙]{2,})/g, "$1$2. ")
     .replace(/([ก-๙]{2,})(คูคต|ลำลูกกา|ปทุมธานี|อยุธยา|บางนางร้า|บางปะหัน|พบพระ|ตาก)/g, "$1 $2")
     .trim();
 
@@ -2684,11 +2731,11 @@ function buildOrderSummaryText(params: {
 }): string {
   const { product, offer, customerInfo } = params;
 
-  const safeName = normalizeWhitespace(
-    customerInfo.name ||
-    customerInfo.facebookName ||
-    ""
-  );
+  const safeName = sanitizeSummaryName({
+    rawName: customerInfo.name || "",
+    rawAddress: customerInfo.address || "",
+    facebookName: customerInfo.facebookName || "",
+  });
 
   let safeAddress = normalizeWhitespace(customerInfo.address || "");
 
@@ -2707,11 +2754,7 @@ function buildOrderSummaryText(params: {
     safeAddress,
   });
 
-  const displayName =
-    getDisplayCustomerName(customerInfo) ||
-    normalizeWhitespace(customerInfo.name || "") ||
-    normalizeWhitespace(customerInfo.facebookName || "");
-
+  const displayName = safeName;
   const showFacebookName =
     customerInfo.facebookName &&
     customerInfo.facebookName.trim() &&
@@ -2722,7 +2765,7 @@ function buildOrderSummaryText(params: {
     displayName ? `ชื่อ: ${displayName}` : "",
     showFacebookName ? `ชื่อ Facebook: ${customerInfo.facebookName}` : "",
     customerInfo.phone ? `เบอร์โทร: ${customerInfo.phone}` : "",
-    customerInfo.address ? `ที่อยู่: ${customerInfo.address}` : "",
+    safeAddress ? `ที่อยู่: ${safeAddress}` : "",
     `สินค้า: ${product.name}`,
     `โปรที่เลือก: ${offer.title}`,
     offer.price ? `ยอดเก็บปลายทาง: ${offer.price} บาท` : "",
