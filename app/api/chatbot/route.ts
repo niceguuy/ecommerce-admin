@@ -852,7 +852,21 @@ function removeNamePrefixFromText(text: string, name: string): string {
 
 function extractAddress(text: string): string {
   const normalizedInput = cleanupThaiAddressNoise(normalizeCustomerRawText(text));
-  const detectedName = extractName(normalizedInput);
+  let detectedName = "";
+
+  const lines = splitLines(normalizedInput);
+  for (const line of lines) {
+    const candidate = cleanPossibleNameLine(line);
+    if (
+      candidate &&
+      looksLikeNameValue(candidate) &&
+      !looksLikeAddress(candidate) &&
+      !looksLikePhone(candidate)
+    ) {
+      detectedName = candidate;
+      break;
+    }
+  }
 
   const safeDetectedName =
     detectedName &&
@@ -899,8 +913,6 @@ function extractAddress(text: string): string {
   if (looksLikeAddress(cleaned)) {
     return cleaned;
   }
-
-  const lines = splitLines(normalizedInput);
 
   let bestCandidate = "";
   let bestScore = 0;
@@ -1169,35 +1181,135 @@ function extractName(text: string): string {
   return bestScore > 0 ? bestName : "";
 }
 
+function splitPackedThaiCustomerText(text: string): string {
+  return normalizeCustomerRawText(text || "")
+    .replace(/([ก-๙])((?:\+66|66|0)\d{8,9})/g, "$1 $2")
+    .replace(/((?:\+66|66|0)\d{8,9})([ก-๙])/g, "$1 $2")
+    .replace(/(\d{5})([ก-๙])/g, "$1 $2")
+    .replace(/([ก-๙])(\d{5})/g, "$1 $2")
+    .replace(/([ก-๙]{2,})(\d{1,4}\/\d{1,4})/g, "$1 $2")
+    .replace(/(\d{1,4}\/\d{1,4})([ก-๙]{2,})/g, "$1 $2")
+    .replace(/([ก-๙]{2,})(\d{1,4})(หมู่|ม\.|ม\s)/g, "$1 $2 $3")
+    .replace(/(\d)(จ\.|จังหวัด|อ\.|อำเภอ|ต\.|ตำบล|เขต|แขวง)/g, "$1 $2")
+    .replace(/(\*{2,}\d*|\d*\*{2,})/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function removeMaskedPhoneGarbage(text: string): string {
+  return normalizeWhitespace((text || "").replace(/(\*{2,}\d*|\d*\*{2,})/g, " "));
+}
+
+function pickPackedNameCandidate(
+  rawText: string,
+  currentAddress: string,
+  currentPhone: string,
+  currentName: string
+): string {
+  let working = splitPackedThaiCustomerText(rawText || "");
+
+  if (currentAddress) {
+    working = working.replace(currentAddress, " ");
+  }
+
+  if (currentPhone) {
+    working = working.replace(currentPhone, " ");
+  }
+
+  working = removeMaskedPhoneGarbage(working);
+  working = removePhoneFromText(working);
+  working = removeCommonOrderWords(working);
+  working = stripOfferNoise(working);
+  working = normalizeWhitespace(working);
+
+  const firstAddressIndex = working.search(
+    /(บ้านเลขที่|เลขที่|\b\d{1,4}(\/\d{1,4})?\b\s*(หมู่|ม\s*\d+|ม\.|ซอย|ถนน|ต\.|ตำบล|อ\.|อำเภอ|จ\.|จังหวัด|แขวง|เขต|อาคาร)?|หมู่|ม\s*\d+|ม\.|ซอย|ถนน|ต\.|ตำบล|อ\.|อำเภอ|จ\.|จังหวัด|แขวง|เขต|อาคาร|\b\d{5}\b|กรุงเทพ|กทม)/i
+  );
+
+  if (firstAddressIndex > 0) {
+    working = working.slice(0, firstAddressIndex);
+  }
+
+  const candidate = cleanPossibleNameLine(working);
+
+  if (looksLikeNameValue(candidate)) {
+    return candidate;
+  }
+
+  return currentName || "";
+}
+
+function repairExtractedCustomerInfoFromRawText(
+  rawText: string,
+  info: ExtractedCustomerInfo
+): ExtractedCustomerInfo {
+  const normalizedRaw = splitPackedThaiCustomerText(rawText || "");
+
+  const repairedPhone = info.phone || extractPhone(normalizedRaw);
+
+  let repairedAddress = mergeAddressParts(
+    info.address || "",
+    extractAddress(normalizedRaw)
+  );
+
+  repairedAddress = removeMaskedPhoneGarbage(repairedAddress);
+  repairedAddress = normalizeWhitespace(repairedAddress);
+
+  let repairedName = info.name || "";
+  repairedName = pickPackedNameCandidate(
+    normalizedRaw,
+    repairedAddress,
+    repairedPhone,
+    repairedName
+  );
+
+  if (repairedName && looksLikeAddress(repairedName)) {
+    repairedName = "";
+  }
+
+  if (repairedName) {
+    repairedAddress = removeDetectedNameFromAddress(repairedAddress, repairedName);
+  }
+
+  repairedAddress = trimTrailingNameFromAddress(repairedAddress);
+  repairedAddress = normalizeWhitespace(repairedAddress);
+
+  return {
+    ...info,
+    name: repairedName,
+    phone: repairedPhone,
+    address: repairedAddress,
+  };
+}
+
 function extractCustomerInfoFromText(text: string): ExtractedCustomerInfo {
   const normalized = cleanupThaiAddressNoise(normalizeCustomerRawText(text));
-  let name = extractName(normalized);
-  const phone = extractPhone(normalized);
-  const address = extractAddress(normalized);
 
-  // กันชื่อมั่วจาก address / phone / คำขยะ
+  let parsed: ExtractedCustomerInfo = {
+    name: extractName(normalized),
+    phone: extractPhone(normalized),
+    address: extractAddress(normalized),
+    facebookName: "",
+  };
+
+  parsed = repairExtractedCustomerInfoFromRawText(text, parsed);
+
   if (
-    looksLikeAddress(name) ||
-    looksLikePhone(name) ||
-    isLowConfidenceName(name)
+    looksLikeAddress(parsed.name) ||
+    looksLikePhone(parsed.name) ||
+    isLowConfidenceName(parsed.name)
   ) {
-    name = "";
+    parsed.name = "";
+    parsed = repairExtractedCustomerInfoFromRawText(text, parsed);
   }
 
   console.log("TEXT_PARSE_DEBUG", {
     originalText: text,
     normalized,
-    name,
-    phone,
-    address,
+    parsed,
   });
 
-  return {
-    name,
-    phone,
-    address,
-    facebookName: "",
-  };
+  return parsed;
 }
 
 async function extractCustomerInfoWithAiFallback(text: string): Promise<ExtractedCustomerInfo> {
@@ -1480,7 +1592,7 @@ async function extractCustomerInfoFromHistory(
     customerInfo = mergeCustomerInfo(customerInfo, extracted);
   }
 
-  const latestExtracted = extractCustomerInfoFromText(latestMessage);
+  const latestExtracted = await extractCustomerInfoWithAiFallback(latestMessage);
 
   console.log("DEBUG_LATEST_MESSAGE_PARSE", {
     latestMessage,
