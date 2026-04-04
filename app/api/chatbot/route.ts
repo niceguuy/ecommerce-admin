@@ -1179,8 +1179,24 @@ function extractAddress(text: string): string {
     }
   }
 
+  cleaned = cleaned
+    .replace(/\bจ\.\s*[ก-๙]+\s*จ\.\s*[ก-๙]*$/i, (m) => {
+      const first = m.match(/จ\.\s*[ก-๙]+/i);
+      return first ? first[0] : m;
+    })
+    .replace(/\b(องค์การบริหารส่วนตำบล\s+[ก-๙]+)\s+\1\b/i, "$1")
+    .replace(/\s+/g, " ")
+    .trim();
+
   cleaned = trimTrailingNameFromAddress(cleaned);
   cleaned = normalizeWhitespace(cleaned);
+
+  if (
+    looksLikeGovernmentDropPoint(cleaned) &&
+    /(อ\.|อำเภอ|จ\.|จังหวัด|\b\d{5}\b)/i.test(cleaned)
+  ) {
+    return cleaned;
+  }
 
   if (looksLikeAddress(cleaned)) {
     return cleaned;
@@ -1367,6 +1383,9 @@ function cleanPossibleNameLine(line: string): string {
   if (govPrefix) {
     value = value.replace(govPrefix, " ");
   }
+  value = value
+    .replace(/\b(องค์การบริหารส่วนตำบล|องค์การบริหารส่วนจังหวัด|เทศบาลตำบล|เทศบาลเมือง|เทศบาลนคร|โรงเรียน|โรงพยาบาล|สำนักงาน|บริษัท|ร้าน|อู่|โกดัง)\b.*$/i, " ")
+    .replace(/\b(อบต\.?|อบจ\.?|เทศบาล|โรงเรียน|โรงพยาบาล|สำนักงาน|บริษัท|ร้าน|อู่|โกดัง)\b.*$/i, " ");
 
   const firstAddressIndex = findThaiAddressStartIndex(value);
   if (firstAddressIndex > 0) {
@@ -1584,13 +1603,20 @@ function pickPackedNameCandidate(
 
   const candidate = cleanPossibleNameLine(working);
 
+  const strippedCandidate = normalizeWhitespace(
+    candidate.replace(
+      /\b(องค์การบริหารส่วนตำบล|องค์การบริหารส่วนจังหวัด|เทศบาลตำบล|เทศบาลเมือง|เทศบาลนคร|อบต\.?|อบจ\.?|โรงเรียน|โรงพยาบาล|สำนักงาน|บริษัท|ร้าน|อู่|โกดัง)\b.*$/i,
+      ""
+    )
+  );
+
   if (
-    candidate &&
-    !looksLikeAddress(candidate) &&
-    !/(\d{1,4}\/\d{1,4}|\b\d{5}\b|พหลโยธิน|คูคต|ลาดลูกกา|ลำลูกกา|ปทุมธานี|อยุธยา|พระนครศรีอยุธยา|ตาก|พบพระ|สุรินทร์|สระแก้ว|วัฒนานคร|บางนางร้า|บางปะหัน|ชุมพลบุรี|สระขุด)/i.test(candidate) &&
-    looksLikeNameValue(candidate)
+    strippedCandidate &&
+    !looksLikeAddress(strippedCandidate) &&
+    !/(\d{1,4}\/\d{1,4}|\b\d{5}\b|พหลโยธิน|คูคต|ลาดลูกกา|ลำลูกกา|ปทุมธานี|อยุธยา|พระนครศรีอยุธยา|ตาก|พบพระ|สุรินทร์|สระแก้ว|วัฒนานคร|บางนางร้า|บางปะหัน|ชุมพลบุรี|สระขุด)/i.test(strippedCandidate) &&
+    looksLikeNameValue(strippedCandidate)
   ) {
-    return candidate;
+    return strippedCandidate;
   }
 
   return currentName || "";
@@ -2135,6 +2161,20 @@ function hasEnoughThaiAddressForCOD(address: string): boolean {
       hasRepeatedLocationWord
     )
   ) {
+    return true;
+  }
+
+  const normalizedAddress = normalizeWhitespace(
+    normalizeCustomerRawText(address || "")
+  );
+  
+  const governmentDropPointReady =
+    looksLikeGovernmentDropPoint(normalizedAddress) &&
+    /(อ\.|อำเภอ|เขต|เมือง|พบพระ|ลำลูกกา|ชุมพลบุรี|บางปะหัน)/i.test(normalizedAddress) &&
+    /(จ\.|จังหวัด|ตาก|ปทุมธานี|สุรินทร์|พระนครศรีอยุธยา|สระแก้ว)/i.test(normalizedAddress) &&
+    /\b\d{5}\b/.test(normalizedAddress);
+
+  if (governmentDropPointReady) {
     return true;
   }
 
@@ -3545,12 +3585,12 @@ export async function POST(req: Request) {
     const confirmationIntent = isConfirmationIntent(safeMessage);
     const conversationState = detectConversationState(messages);
     const customerInfoFromHistory = editIntent.isEdit
-  ? await extractCustomerInfoFromHistory(messages, "", {
-      enableAi: enableAiCustomerParse,
-    })
-  : await extractCustomerInfoFromHistory(messages, safeMessage, {
-      enableAi: enableAiCustomerParse,
-    });
+      ? await extractCustomerInfoFromHistory(messages, "", {
+        enableAi: enableAiCustomerParse,
+      })
+      : await extractCustomerInfoFromHistory(messages, safeMessage, {
+        enableAi: enableAiCustomerParse,
+      });
 
     const customerInfoFromBotImageConfirmation =
       extractCustomerInfoFromBotImageConfirmation(history);
@@ -3938,7 +3978,7 @@ export async function POST(req: Request) {
       const normalizedAddressForFallback = normalizeThaiAddressForCheck(
         finalCustomerInfo.address || ""
       );
-      
+
       const fallbackSummaryReady =
         Boolean((finalCustomerInfo.name || finalCustomerInfo.facebookName) && finalCustomerInfo.phone) &&
         hasEnoughThaiAddressForCOD(normalizedAddressForFallback);
