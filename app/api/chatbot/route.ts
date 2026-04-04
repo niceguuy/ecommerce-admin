@@ -218,6 +218,59 @@ function normalizeWhitespace(text: string): string {
   return text.replace(/\s+/g, " ").trim();
 }
 
+function normalizeThaiAddressTokens(text: string): string {
+  return (text || "")
+    .replace(/อบต\./g, "องค์การบริหารส่วนตำบล ")
+    .replace(/อบจ\./g, "องค์การบริหารส่วนจังหวัด ")
+    .replace(/เทศบาลตำบล/g, "เทศบาลตำบล ")
+    .replace(/เทศบาลเมือง/g, "เทศบาลเมือง ")
+    .replace(/เทศบาลนคร/g, "เทศบาลนคร ")
+    .replace(/รพ\.สต\./g, "รพ สต ")
+    .replace(/บจก\./g, "บริษัท ")
+    .replace(/จ\./g, "จ. ")
+    .replace(/อ\./g, "อ. ")
+    .replace(/ต\./g, "ต. ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function findThaiAddressStartIndex(text: string): number {
+  const value = normalizeWhitespace(text || "");
+  if (!value) return -1;
+
+  const patterns = [
+    /\b\d{1,4}(\/\d{1,4})?\b\s*(หมู่|ม\.|ม\s*\d+|ซอย|ถนน|ต\.|ตำบล|อ\.|อำเภอ|จ\.|จังหวัด|แขวง|เขต|อาคาร|บ้านเลขที่|เลขที่)/i,
+    /(?:^|\s)(หมู่|ม\.|ซอย|ถนน|บ้านเลขที่|เลขที่)\s*\d*/i,
+    /(?:^|\s)(ต\.|ตำบล|แขวง)\s*[ก-๙]/i,
+    /(?:^|\s)(อ\.|อำเภอ|เขต)\s*[ก-๙]/i,
+    /(?:^|\s)(จ\.|จังหวัด)\s*[ก-๙]/i,
+    /\b\d{5}\b/,
+    /(?:^|\s)(กรุงเทพ|กทม|กระบี่|กาญจนบุรี|กาฬสินธุ์|กำแพงเพชร|ขอนแก่น|จันทบุรี|ฉะเชิงเทรา|ชลบุรี|ชัยนาท|ชัยภูมิ|ชุมพร|เชียงราย|เชียงใหม่|ตรัง|ตราด|ตาก|นครนายก|นครปฐม|นครพนม|นครราชสีมา|นครศรีธรรมราช|นครสวรรค์|นนทบุรี|นราธิวาส|น่าน|บึงกาฬ|บุรีรัมย์|ปทุมธานี|ประจวบคีรีขันธ์|ปราจีนบุรี|ปัตตานี|พระนครศรีอยุธยา|พะเยา|พังงา|พัทลุง|พิจิตร|พิษณุโลก|เพชรบุรี|เพชรบูรณ์|แพร่|ภูเก็ต|มหาสารคาม|มุกดาหาร|แม่ฮ่องสอน|ยโสธร|ยะลา|ร้อยเอ็ด|ระนอง|ระยอง|ราชบุรี|ลพบุรี|ลำปาง|ลำพูน|เลย|ศรีสะเกษ|สกลนคร|สงขลา|สตูล|สมุทรปราการ|สมุทรสงคราม|สมุทรสาคร|สระแก้ว|สระบุรี|สิงห์บุรี|สุโขทัย|สุพรรณบุรี|สุราษฎร์ธานี|สุรินทร์|หนองคาย|หนองบัวลำภู|อ่างทอง|อุดรธานี|อุทัยธานี|อุตรดิตถ์|อุบลราชธานี|อำนาจเจริญ)/i,
+    /(?:^|\s)(องค์การบริหารส่วนตำบล|เทศบาล|โรงเรียน|โรงพยาบาล|สำนักงาน|บริษัท|ร้าน|อู่|โกดัง)\b/i,
+  ];
+
+  let best = -1;
+
+  for (const pattern of patterns) {
+    const match = value.match(pattern);
+    if (!match || match.index == null) continue;
+
+    const index = match.index + (match[0].startsWith(" ") ? 1 : 0);
+    if (best === -1 || index < best) {
+      best = index;
+    }
+  }
+
+  return best;
+}
+
+function normalizeUnderscorePackedText(text: string): string {
+  return (text || "")
+    .replace(/_+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 function isValidImageUrl(text: string): boolean {
   const value = text.trim();
   if (!value) return false;
@@ -928,33 +981,30 @@ function extractAddress(text: string): string {
   cleaned = stripOfferNoise(cleaned);
   cleaned = removeDetectedNameFromAddress(cleaned, safeDetectedName);
   cleaned = removePhoneFromText(cleaned);
+  cleaned = removeMaskedPhoneGarbage(cleaned);
+  cleaned = normalizeThaiAddressTokens(cleaned);
   cleaned = normalizeWhitespace(cleaned);
+
   if (safeDetectedName) {
     cleaned = removeDetectedNameFromAddress(cleaned, safeDetectedName);
     cleaned = normalizeWhitespace(cleaned);
   }
 
-  const firstAddressIndex = cleaned.search(
-    /(บ้านเลขที่|เลขที่|\b\d{1,4}(\/\d{1,4})?\b\s*(หมู่|ม\s*\d+|ม\.|ซอย|ถนน|ต\.|ตำบล|อ\.|อำเภอ|จ\.|จังหวัด|แขวง|เขต|อาคาร)?|หมู่|ม\s*\d+|ม\.|ซอย|ถนน|ต\.|ตำบล|อ\.|อำเภอ|จ\.|จังหวัด|แขวง|เขต|อาคาร|\b\d{5}\b|กรุงเทพ|กทม|วัฒนานคร|สระแก้ว)/i
-  );
-
+  const firstAddressIndex = findThaiAddressStartIndex(cleaned);
   if (firstAddressIndex > 0) {
     cleaned = cleaned.slice(firstAddressIndex);
   }
 
   cleaned = cleaned
-    .replace(/_/g, " ")
     .replace(/(\d)(หมู่|ม)/g, "$1 $2")
     .replace(/(หมู่|ม)(\d)/g, "$1 $2")
     .replace(/(\d)([ก-๙])/g, "$1 $2")
     .replace(/([ก-๙])(\d)/g, "$1 $2")
-    .replace(/วัฒนานคร(?=วัฒนานคร)/g, "วัฒนานคร ")
-    .replace(/วัฒนานคร(?=สระแก้ว)/g, "วัฒนานคร ")
     .replace(/\b(\d{5})\b/g, " $1 ")
     .replace(/\s+/g, " ")
     .trim();
 
-    cleaned = trimTrailingNameFromAddress(cleaned);
+  cleaned = trimTrailingNameFromAddress(cleaned);
 
   if (looksLikeAddress(cleaned)) {
     return cleaned;
@@ -970,26 +1020,22 @@ function extractAddress(text: string): string {
     candidate = stripOfferNoise(candidate);
     candidate = removeNamePrefixFromText(candidate, safeDetectedName);
     candidate = removePhoneFromText(candidate);
+    candidate = removeMaskedPhoneGarbage(candidate);
     candidate = cleanupThaiAddressNoise(candidate);
+    candidate = normalizeThaiAddressTokens(candidate);
     candidate = normalizeWhitespace(candidate);
 
-    const index = candidate.search(
-      /(บ้านเลขที่|เลขที่|\b\d{1,4}(\/\d{1,4})?\b\s*(หมู่|ม\s*\d+|ม\.|ซอย|ถนน|ต\.|ตำบล|อ\.|อำเภอ|จ\.|จังหวัด|แขวง|เขต|อาคาร)?|หมู่|ม\s*\d+|ม\.|ซอย|ถนน|ต\.|ตำบล|อ\.|อำเภอ|จ\.|จังหวัด|แขวง|เขต|อาคาร|\b\d{5}\b|กรุงเทพ|กทม|วัฒนานคร|สระแก้ว)/i
-    );
-
+    const index = findThaiAddressStartIndex(candidate);
     if (index > 0) {
       candidate = candidate.slice(index);
     }
 
     candidate = candidate
-      .replace(/_/g, " ")
       .replace(/(\d)(หมู่|ม)/g, "$1 $2")
       .replace(/(หมู่|ม)(\d)/g, "$1 $2")
       .replace(/(\d)([ก-๙])/g, "$1 $2")
       .replace(/([ก-๙])(\d)/g, "$1 $2")
       .replace(/\b(\d{5})\b/g, " $1 ")
-      .replace(/วัฒนานคร(?=วัฒนานคร)/g, "วัฒนานคร ")
-      .replace(/วัฒนานคร(?=สระแก้ว)/g, "วัฒนานคร ")
       .replace(/\s+/g, " ")
       .trim();
 
@@ -997,10 +1043,11 @@ function extractAddress(text: string): string {
 
     if (/\b\d{1,4}(\/\d{1,4})?\b/.test(candidate)) score += 3;
     if (/(หมู่|ม\.|ม\s+\d+|ซอย|ถนน|บ้านเลขที่|เลขที่)/i.test(candidate)) score += 3;
-    if (/(ต\.|ตำบล|แขวง|ห้วยโจด|ท่าเกษม|บ้านแก้ง|หนองน้ำใส|คลองหาด)/i.test(candidate)) score += 2;
-    if (/(อ\.|อำเภอ|เขต|เมือง|วัฒนานคร|อรัญประเทศ|กบินทร์บุรี)/i.test(candidate)) score += 2;
-    if (/(จ\.|จังหวัด|กรุงเทพ|กทม|สระแก้ว|ชลบุรี|ขอนแก่น|เชียงใหม่|นครราชสีมา)/i.test(candidate)) score += 2;
+    if (/(ต\.|ตำบล|แขวง|ห้วยโจด|ท่าเกษม|บ้านแก้ง|หนองน้ำใส|คลองหาด|คูคต|ละหาร|สระขุด|รวมไทยพัฒนา)/i.test(candidate)) score += 2;
+    if (/(อ\.|อำเภอ|เขต|เมือง|วัฒนานคร|อรัญประเทศ|กบินทร์บุรี|พบพระ|ลำลูกกา|ชุมพลบุรี|ละหานทราย)/i.test(candidate)) score += 2;
+    if (/(จ\.|จังหวัด|กรุงเทพ|กทม|สระแก้ว|ตาก|ปทุมธานี|สุรินทร์|นครราชสีมา|บุรีรัมย์)/i.test(candidate)) score += 2;
     if (/\b\d{5}\b/.test(candidate)) score += 2;
+    if (/(องค์การบริหารส่วนตำบล|เทศบาล|โรงเรียน|โรงพยาบาล|สำนักงาน|บริษัท|ร้าน|อู่|โกดัง)/i.test(candidate)) score += 2;
     if (looksLikeAddress(candidate)) score += 4;
 
     if (score > bestScore) {
@@ -1015,7 +1062,7 @@ function extractAddress(text: string): string {
 
   const wholeTextFallback =
     /\b\d{1,4}(\/\d{1,4})?\b/.test(cleaned) ||
-    /(หมู่|ม\.|ซอย|ถนน|ต\.|ตำบล|อ\.|อำเภอ|จ\.|จังหวัด|แขวง|เขต|กรุงเทพ|กทม|วัฒนานคร|สระแก้ว)/i.test(cleaned);
+    /(หมู่|ม\.|ซอย|ถนน|ต\.|ตำบล|อ\.|อำเภอ|จ\.|จังหวัด|แขวง|เขต|กรุงเทพ|กทม|วัฒนานคร|สระแก้ว|องค์การบริหารส่วนตำบล|เทศบาล)/i.test(cleaned);
 
   if (wholeTextFallback && cleaned.length >= 4) {
     return cleaned;
@@ -1025,7 +1072,12 @@ function extractAddress(text: string): string {
 }
 
 function normalizeCustomerRawText(text: string): string {
-  return text
+  let value = text || "";
+
+  value = normalizeUnderscorePackedText(value);
+  value = normalizeThaiAddressTokens(value);
+
+  value = value
     .replace(/[_|]+/g, " ")
     .replace(/[-]+/g, " ")
     .replace(/[,:;]+/g, " ")
@@ -1035,30 +1087,24 @@ function normalizeCustomerRawText(text: string): string {
     .replace(/(\d)([a-zA-Z])/g, "$1 $2")
     .replace(/หมู่(\d+)/g, "หมู่ $1")
     .replace(/ม(\d+)/g, "ม $1")
-    .replace(/ต(\d+)/g, "ต $1")
-    .replace(/อ(\d+)/g, "อ $1")
-    .replace(/จ(\d+)/g, "จ $1")
+    .replace(/(\d{5})(0\d{9})(?!\d)/g, "$1 $2")
+    .replace(/(\d{5})(66\d{9})(?!\d)/g, "$1 $2")
+    .replace(/([ก-๙])((?:\+66|66|0)\d{9})(?!\d)/g, "$1 $2")
+    .replace(/((?:\+66|66|0)\d{9})([ก-๙])/g, "$1 $2")
     .replace(/(\d{5})([ก-๙])/g, "$1 $2")
     .replace(/([ก-๙])(\d{5})/g, "$1 $2")
     .replace(/([ก-๙])([A-Za-z])/g, "$1 $2")
     .replace(/([A-Za-z])([ก-๙])/g, "$1 $2")
-    .replace(/\s+/g, " ")
+    .replace(/([ก-๙]{2,})(\d{1,4}\/\d{1,4})/g, "$1 $2")
+    .replace(/(\d{1,4}\/\d{1,4})([ก-๙]{2,})/g, "$1 $2")
+    .replace(/([ก-๙])((?:องค์การบริหารส่วนตำบล|เทศบาล|โรงเรียน|โรงพยาบาล|สำนักงาน))/g, "$1 $2")
     .replace(/กรงเทพ/g, "กรุงเทพ")
     .replace(/กุงเทพ/g, "กรุงเทพ")
     .replace(/กทม\./g, "กทม")
-    .replace(/ตำวัฒนานคร/g, "ต วัฒนานคร")
-    .replace(/ตําวัฒนานคร/g, "ต วัฒนานคร")
-    .replace(/อวัฒนานคร/g, "อ วัฒนานคร")
-    .replace(/จสระแก้ว/g, "จ สระแก้ว")
-    .replace(/จ\.สระแก้ว/g, "จ สระแก้ว")
-    .replace(/([ก-๙])(\d{1,4}\/\d{1,4})/g, "$1 $2")
-    .replace(/(\d{1,4}\/\d{1,4})([ก-๙])/g, "$1 $2")
-    .replace(/([ก-๙])(กรุงเทพ|กทม|วัฒนานคร|สระแก้ว)/g, "$1 $2")
-    .replace(/(กรุงเทพ|กทม|วัฒนานคร|สระแก้ว)(\d{5})/g, "$1 $2")
-    .replace(/(\d{5})(กรุงเทพ|กทม|วัฒนานคร|สระแก้ว)/g, "$1 $2")
-    .replace(/([ก-๙])((?:\+66|66|0)\d{8,9})/g, "$1 $2")
-    .replace(/((?:\+66|66|0)\d{8,9})([ก-๙])/g, "$1 $2")
+    .replace(/\s+/g, " ")
     .trim();
+
+  return value;
 }
 
 function stripOfferNoise(text: string): string {
@@ -1113,17 +1159,17 @@ function cleanPossibleNameLine(line: string): string {
   value = removeCommonOrderWords(value);
   value = stripOfferNoise(value);
 
-  const addressIndex = value.search(
-    /(บ้านเลขที่|เลขที่|\b\d{1,4}\/\d{1,4}\b|\b\d{1,4}\b\s*(หมู่|ม\s*\d+|ม\.|ซอย|ถนน|ต\.|ตำบล|อ\.|อำเภอ|จ\.|จังหวัด|แขวง|เขต|อาคาร)|หมู่|ม\s*\d+|ม\.|ซอย|ถนน|ต\.|ตำบล|อ\.|อำเภอ|จ\.|จังหวัด|แขวง|เขต|อาคาร|\b\d{5}\b|กรุงเทพ|กทม|วัฒนานคร|สระแก้ว)/i
-  );
-
+  const addressIndex = findThaiAddressStartIndex(value);
   if (addressIndex > 0) {
     value = value.slice(0, addressIndex);
   }
 
-  value = value.replace(/[,:;|/\\]+/g, " ");
-  value = value.replace(/\b\d+\b/g, " ");
-  value = normalizeWhitespace(value);
+  value = value
+    .replace(/(องค์การบริหารส่วนตำบล|เทศบาล|โรงเรียน|โรงพยาบาล|สำนักงาน|บริษัท|ร้าน|อู่|โกดัง).*$/i, " ")
+    .replace(/[,:;|/\\]+/g, " ")
+    .replace(/\b\d+\b/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 
   return value;
 }
@@ -1287,6 +1333,8 @@ function pickPackedNameCandidate(
   currentName: string
 ): string {
   let working = splitPackedThaiCustomerText(rawText || "");
+  working = normalizeUnderscorePackedText(working);
+  working = normalizeThaiAddressTokens(working);
 
   if (currentAddress) {
     working = working.replace(currentAddress, " ");
@@ -1302,10 +1350,7 @@ function pickPackedNameCandidate(
   working = stripOfferNoise(working);
   working = normalizeWhitespace(working);
 
-  const firstAddressIndex = working.search(
-    /(บ้านเลขที่|เลขที่|\b\d{1,4}(\/\d{1,4})?\b\s*(หมู่|ม\s*\d+|ม\.|ซอย|ถนน|ต\.|ตำบล|อ\.|อำเภอ|จ\.|จังหวัด|แขวง|เขต|อาคาร)?|หมู่|ม\s*\d+|ม\.|ซอย|ถนน|ต\.|ตำบล|อ\.|อำเภอ|จ\.|จังหวัด|แขวง|เขต|อาคาร|\b\d{5}\b|กรุงเทพ|กทม)/i
-  );
-
+  const firstAddressIndex = findThaiAddressStartIndex(working);
   if (firstAddressIndex > 0) {
     working = working.slice(0, firstAddressIndex);
   }
