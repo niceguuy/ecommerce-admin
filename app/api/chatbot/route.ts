@@ -527,27 +527,47 @@ function looksLikePhone(text: string): boolean {
 }
 
 function normalizePhone(text: string): string {
-  const digits = text.replace(/\D/g, "");
+  const digits = (text || "").replace(/\D/g, "");
 
   if (/^0\d{9}$/.test(digits)) return digits;
   if (/^66\d{9}$/.test(digits)) return `0${digits.slice(2)}`;
+
+  // ดึงเบอร์ไทยที่แอบติดอยู่ในสตริงยาว
+  const localMatches = digits.match(/0\d{9}/g) || [];
+  for (const match of localMatches) {
+    if (/^0\d{9}$/.test(match)) return match;
+  }
+
+  const thaiMatches = digits.match(/66\d{9}/g) || [];
+  for (const match of thaiMatches) {
+    if (/^66\d{9}$/.test(match)) return `0${match.slice(2)}`;
+  }
 
   return "";
 }
 
 function extractPhone(text: string): string {
-  const normalized = normalizeCustomerRawText(text);
+  const normalized = splitPackedThaiCustomerText(text || "");
 
-  const matches = normalized.match(/(?:\+66|66|0)\d{8,9}/g) || [];
-  for (const raw of matches) {
+  const explicitMatches = [
+    ...(normalized.match(/(?:^|[^\d])(\+66\d{9}|66\d{9}|0\d{9})(?!\d)/g) || []),
+  ]
+    .map((item) => item.replace(/[^\d+]/g, ""))
+    .filter(Boolean);
+
+  for (const raw of explicitMatches) {
     const normalizedPhone = normalizePhone(raw);
     if (normalizedPhone) return normalizedPhone;
   }
 
   const compact = normalized.replace(/[^\d+]/g, " ");
-  const compactMatches = compact.match(/(?:\+66|66|0)\d{8,9}/g) || [];
-  for (const raw of compactMatches) {
-    const normalizedPhone = normalizePhone(raw);
+  const tokens = compact
+    .split(/\s+/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+
+  for (const token of tokens) {
+    const normalizedPhone = normalizePhone(token);
     if (normalizedPhone) return normalizedPhone;
   }
 
@@ -638,28 +658,41 @@ function isStrongThaiAddress(text: string): boolean {
 function getMissingThaiAddressParts(address: string): string[] {
   const value = normalizeWhitespace(normalizeCustomerRawText(address || ""));
   if (!value) {
-    return ["บ้านเลขที่", "ตำบล", "อำเภอ", "จังหวัด"];
+    return ["ชื่อ", "เบอร์โทร", "ที่อยู่"];
   }
 
-  const missing: string[] = [];
-
   const hasHouseNumber = /\b\d{1,4}(\/\d{1,4})?\b/.test(value);
+  const hasZipCode = /\b\d{5}\b/.test(value);
+
   const hasSubdistrict =
-    /(ตำบล|ต\.|แขวง|ห้วยโจด|ท่าเกษม|บ้านแก้ง|หนองน้ำใส|คลองหาด|วัฒนานคร)/.test(
+    /(ตำบล|ต\.|แขวง|ห้วยโจด|ท่าเกษม|บ้านแก้ง|หนองน้ำใส|คลองหาด|รวมไทยพัฒนา|คูคต|ละหาร|หนองคู|บางงิ้ว)/.test(
       value
     );
+
   const hasDistrict =
-    /(อำเภอ|อ\.|เขต|เมือง|วัฒนานคร|อรัญประเทศ|กบินทร์บุรี|บางนา|ลาดกระบัง|บางบัวทอง|ธัญบุรี)/.test(
+    /(อำเภอ|อ\.|เขต|เมือง|วัฒนานคร|อรัญประเทศ|กบินทร์บุรี|พบพระ|ละหานทราย|ลำปลายมาศ|คูคต|ลำลูกกา|ในเมือง|ชุมพลบุรี)/.test(
       value
     );
+
   const hasProvince =
     /(กรุงเทพ|กทม|กระบี่|กาญจนบุรี|กาฬสินธุ์|กำแพงเพชร|ขอนแก่น|จันทบุรี|ฉะเชิงเทรา|ชลบุรี|ชัยนาท|ชัยภูมิ|ชุมพร|เชียงราย|เชียงใหม่|ตรัง|ตราด|ตาก|นครนายก|นครปฐม|นครพนม|นครราชสีมา|นครศรีธรรมราช|นครสวรรค์|นนทบุรี|นราธิวาส|น่าน|บึงกาฬ|บุรีรัมย์|ปทุมธานี|ประจวบคีรีขันธ์|ปราจีนบุรี|ปัตตานี|พระนครศรีอยุธยา|พะเยา|พังงา|พัทลุง|พิจิตร|พิษณุโลก|เพชรบุรี|เพชรบูรณ์|แพร่|ภูเก็ต|มหาสารคาม|มุกดาหาร|แม่ฮ่องสอน|ยโสธร|ยะลา|ร้อยเอ็ด|ระนอง|ระยอง|ราชบุรี|ลพบุรี|ลำปาง|ลำพูน|เลย|ศรีสะเกษ|สกลนคร|สงขลา|สตูล|สมุทรปราการ|สมุทรสงคราม|สมุทรสาคร|สระแก้ว|สระบุรี|สิงห์บุรี|สุโขทัย|สุพรรณบุรี|สุราษฎร์ธานี|สุรินทร์|หนองคาย|หนองบัวลำภู|อ่างทอง|อุดรธานี|อุทัยธานี|อุตรดิตถ์|อุบลราชธานี|อำนาจเจริญ)/.test(
       value
     );
 
-  if (!hasHouseNumber) missing.push("บ้านเลขที่");
-  if (!hasSubdistrict) missing.push("ตำบล");
-  if (!hasDistrict) missing.push("อำเภอ");
+  const isGovernmentLocation =
+    /(อบต\.|องค์การบริหารส่วนตำบล|เทศบาล|โรงเรียน|โรงพยาบาล|รพ\.สต\.|สำนักงาน|บริษัท|ร้าน|อู่|โกดัง)/.test(
+      value
+    );
+
+  // ถ้าเป็นหน่วยงาน/จุดรับของเฉพาะ และพอส่งได้แล้ว → ไม่ต้องถือว่าขาด
+  if (isGovernmentLocation && hasProvince && (hasZipCode || hasDistrict || hasSubdistrict)) {
+    return [];
+  }
+
+  const missing: string[] = [];
+  if (!hasHouseNumber && !isGovernmentLocation) missing.push("บ้านเลขที่");
+  if (!hasSubdistrict && !hasZipCode) missing.push("ตำบล");
+  if (!hasDistrict && !hasZipCode) missing.push("อำเภอ");
   if (!hasProvince) missing.push("จังหวัด");
 
   return missing;
@@ -1183,13 +1216,24 @@ function extractName(text: string): string {
 
 function splitPackedThaiCustomerText(text: string): string {
   return normalizeCustomerRawText(text || "")
-    .replace(/([ก-๙])((?:\+66|66|0)\d{8,9})/g, "$1 $2")
-    .replace(/((?:\+66|66|0)\d{8,9})([ก-๙])/g, "$1 $2")
+    // แยกรหัสไปรษณีย์ออกจากเบอร์โทรที่ติดกัน
+    .replace(/(\d{5})(0\d{9})(?!\d)/g, "$1 $2")
+    .replace(/(\d{5})(66\d{9})(?!\d)/g, "$1 $2")
+    .replace(/(\d{5})(\+66\d{9})(?!\d)/g, "$1 $2")
+
+    // แยกชื่อ/ที่อยู่/เบอร์ที่พิมพ์ติดกัน
+    .replace(/([ก-๙])((?:\+66|66|0)\d{9})(?!\d)/g, "$1 $2")
+    .replace(/((?:\+66|66|0)\d{9})([ก-๙])/g, "$1 $2")
     .replace(/(\d{5})([ก-๙])/g, "$1 $2")
     .replace(/([ก-๙])(\d{5})/g, "$1 $2")
     .replace(/([ก-๙]{2,})(\d{1,4}\/\d{1,4})/g, "$1 $2")
     .replace(/(\d{1,4}\/\d{1,4})([ก-๙]{2,})/g, "$1 $2")
     .replace(/([ก-๙]{2,})(\d{1,4})(หมู่|ม\.|ม\s)/g, "$1 $2 $3")
+
+    // แยกบ้านเลขที่ชนรหัสไปรษณีย์ เช่น 121300 → 12 13000
+    .replace(/(\d{1,4})(\d{5})(?!\d)/g, "$1 $2")
+
+    // แยกก่อน keyword ที่อยู่
     .replace(/(\d)(จ\.|จังหวัด|อ\.|อำเภอ|ต\.|ตำบล|เขต|แขวง)/g, "$1 $2")
     .replace(/(\*{2,}\d*|\d*\*{2,})/g, " ")
     .replace(/\s+/g, " ")
@@ -1737,24 +1781,35 @@ function hasEnoughThaiAddressForCOD(address: string): boolean {
   const hasZipCode = /\b\d{5}\b/.test(value);
 
   const hasProvince =
-    /(กรุงเทพ|กทม|กระบี่|กาญจนบุรี|กาฬสินธุ์|กำแพงเพชร|ขอนแก่น|จันทบุรี|ฉะเชิงเทรา|ชลบุรี|ชัยนาท|ชัยภูมิ|ชุมพร|เชียงราย|เชียงใหม่|ตรัง|ตราด|ตาก|นครนายก|นครปฐม|นครพนม|นครราชสีมา|นครศรีธรรมราช|นครสวรรค์|นนทบุรี|นราธิวาส|น่าน|บึงกาฬ|บุรีรัมย์|ปทุมธานี|ประจวบคีรีขันธ์|ปราจีนบุรี|ปัตตานี|พระนครศรีอยุธยา|พะเยา|พังงา|พัทลุง|พิจิตร|พิษณุโลก|เพชรบุรี|เพชรบูรณ์|แพร่|ภูเก็ต|มหาสารคาม|มุกดาหาร|แม่ฮ่องสอน|ยโสธร|ยะลา|ร้อยเอ็ด|ระนอง|ระยอง|ราชบุรี|ลพบุรี|ลำปาง|ลำพูน|เลย|ศรีสะเกษ|สกลนคร|สงขลา|สตูล|สมุทรปราการ|สมุทรสงคราม|สมุทรสาคร|สระแก้ว|สระบุรี|สิงห์บุรี|สุโขทัย|สุพรรณบุรี|สุราษฎร์ธานี|สุรินทร์|หนองคาย|หนองบัวลำภู|อ่างทอง|อุดรธานี|อุทัยธานี|อุตรดิตถ์|อุบลราชธานี|อำนาจเจริญ)/.test(
-      value
-    );
+    /(กรุงเทพ|กทม|กระบี่|กาญจนบุรี|กาฬสินธุ์|กำแพงเพชร|ขอนแก่น|จันทบุรี|ฉะเชิงเทรา|ชลบุรี|ชัยนาท|ชัยภูมิ|ชุมพร|เชียงราย|เชียงใหม่|ตรัง|ตราด|ตาก|นครนายก|นครปฐม|นครพนม|นครราชสีมา|นครศรีธรรมราช|นครสวรรค์|นนทบุรี|นราธิวาส|น่าน|บึงกาฬ|บุรีรัมย์|ปทุมธานี|ประจวบคีรีขันธ์|ปราจีนบุรี|ปัตตานี|พระนครศรีอยุธยา|พะเยา|พังงา|พัทลุง|พิจิตร|พิษณุโลก|เพชรบุรี|เพชรบูรณ์|แพร่|ภูเก็ต|มหาสารคาม|มุกดาหาร|แม่ฮ่องสอน|ยโสธร|ยะลา|ร้อยเอ็ด|ระนอง|ระยอง|ราชบุรี|ลพบุรี|ลำปาง|ลำพูน|เลย|ศรีสะเกษ|สกลนคร|สงขลา|สตูล|สมุทรปราการ|สมุทรสงคราม|สมุทรสาคร|สระแก้ว|สระบุรี|สิงห์บุรี|สุโขทัย|สุพรรณบุรี|สุราษฎร์ธานี|สุรินทร์|หนองคาย|หนองบัวลำภู|อ่างทอง|อุดรธานี|อุทัยธานี|อุตรดิตถ์|อุบลราชธานี|อำนาจเจริญ)/.test(value);
 
   const hasDistrict =
-    /(อำเภอ|อ\.|เขต|เมือง|วัฒนานคร|อรัญประเทศ|กบินทร์บุรี|บางนา|ลาดกระบัง|บางบัวทอง|ธัญบุรี)/.test(
+    /(อำเภอ|อ\.|เขต|เมือง|วัฒนานคร|อรัญประเทศ|กบินทร์บุรี|พบพระ|ละหานทราย|ลำปลายมาศ|คูคต|ลำลูกกา|ในเมือง|ชุมพลบุรี)/.test(
       value
     );
 
   const hasSubdistrict =
-    /(ตำบล|ต\.|แขวง|ห้วยโจด|ท่าเกษม|บ้านแก้ง|หนองน้ำใส|คลองหาด)/.test(
+    /(ตำบล|ต\.|แขวง|ห้วยโจด|ท่าเกษม|บ้านแก้ง|หนองน้ำใส|คลองหาด|รวมไทยพัฒนา|คูคต|ละหาร|หนองคู|บางงิ้ว)/.test(
       value
     );
 
-  if (isStrongThaiAddress(value)) return true;
+  const isGovernmentLocation =
+    /(อบต\.|องค์การบริหารส่วนตำบล|เทศบาล|โรงเรียน|โรงพยาบาล|รพ\.สต\.|สำนักงาน|บริษัท|ร้าน|อู่|โกดัง)/.test(
+      value
+    );
 
-  // COD ใช้งานจริง: บ้านเลขที่ + จังหวัด + (อำเภอ/เขต หรือ ตำบล/แขวง หรือ รหัสไปรษณีย์)
-  if (hasHouseNumber && hasProvince && (hasDistrict || hasSubdistrict || hasZipCode)) {
+  // 1) หน่วยงาน/จุดรับของเฉพาะ
+  if (isGovernmentLocation && hasProvince && (hasZipCode || hasDistrict || hasSubdistrict)) {
+    return true;
+  }
+
+  // 2) บ้านทั่วไปครบระดับส่งของ
+  if (hasHouseNumber && hasProvince && (hasZipCode || (hasDistrict && hasSubdistrict))) {
+    return true;
+  }
+
+  // 3) ชนบทบางเคส ไม่มีคำเต็ม แต่มีโครงสร้างพอ
+  if (hasHouseNumber && hasDistrict && hasProvince && hasZipCode) {
     return true;
   }
 
