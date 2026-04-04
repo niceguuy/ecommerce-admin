@@ -1373,8 +1373,7 @@ function removeCommonOrderWords(text: string): string {
 function cleanPossibleNameLine(line: string): string {
   let value = normalizeCustomerRawText(line);
 
-  value = value.replace(/^ชื่อผู้รับ[:\s]*/i, "");
-  value = value.replace(/^ชื่อ[:\s]*/i, "");
+  value = stripThaiContactLabels(value);
   value = value.replace(/(?:\+66|66|0)\d{8,9}/g, " ");
 
   value = removeCommonOrderWords(value);
@@ -1394,12 +1393,14 @@ function cleanPossibleNameLine(line: string): string {
   }
 
   value = value
-    .replace(/\b(โทร|โทรศัพท์|เบอร์|เบอร์โทร)\b\.?/gi, " ")
-    .replace(/\b(พหลโยธิน|คูคต|ลาดลูกกา|ลำลูกกา|ปทุมธานี|อยุธยา|พระนครศรีอยุธยา|ตาก|สุรินทร์|สระแก้ว|วัฒนานคร|บางนางร้า|บางปะหัน|พบพระ|ชุมพลบุรี|สระขุด)\b/gi, " ")
+    .replace(/(^|[\s(])(?:พหลโยธิน|คูคต|ลาดลูกกา|ลำลูกกา|ปทุมธานี|อยุธยา|พระนครศรีอยุธยา|ตาก|สุรินทร์|สระแก้ว|วัฒนานคร|บางนางร้า|บางปะหัน|พบพระ|ชุมพลบุรี|สระขุด)(?=[\s)]|$)/gi, "$1 ")
     .replace(/[,:;|/\\]+/g, " ")
     .replace(/\b\d+\b/g, " ")
     .replace(/\s+/g, " ")
     .trim();
+
+  value = stripThaiContactLabels(value);
+  value = stripTrailingNameNoise(value);
 
   return value;
 }
@@ -1441,13 +1442,52 @@ function looksLikeNameValue(text: string): boolean {
   return true;
 }
 
+function stripThaiContactLabels(text: string): string {
+  let value = normalizeWhitespace(text || "");
+  if (!value) return "";
+
+  value = value
+    // ลบ label ที่มักโผล่หน้า/กลาง/ท้ายข้อความชื่อ
+    .replace(/(^|[\s(])(?:ชื่อผู้รับ|ชื่อ|โทรศัพท์|เบอร์โทร|เบอร์|โทร|tel|phone)(?=[\s.:：\-)]|$)/gi, "$1 ")
+    .replace(/(^|[\s(])(?:ผู้รับ|ผู้รับสินค้า)(?=[\s.:：\-)]|$)/gi, "$1 ")
+
+    // ลบรูปแบบมีเครื่องหมายต่อท้าย เช่น "โทร." "เบอร์:" "ชื่อ -"
+    .replace(/(^|[\s(])(?:ชื่อผู้รับ|ชื่อ|โทรศัพท์|เบอร์โทร|เบอร์|โทร|tel|phone)\s*[.:：\-]+/gi, "$1 ")
+
+    // ลบ colon / dash ที่ค้างหลังลบ label
+    .replace(/\s+[.:：\-]+\s*/g, " ")
+
+    .replace(/\s+/g, " ")
+    .trim();
+
+  return value;
+}
+
+function stripTrailingNameNoise(text: string): string {
+  let value = normalizeWhitespace(text || "");
+  if (!value) return "";
+
+  value = value
+    // ตัด suffix ที่ยังเหลือท้ายชื่อ
+    .replace(/\s*(?:โทรศัพท์|เบอร์โทร|เบอร์|โทร|tel|phone)\.?\s*$/gi, "")
+    .replace(/\s*(?:ชื่อผู้รับ|ชื่อ)\.?\s*$/gi, "")
+    .replace(/\s*[-:：|,.;]+\s*$/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  return value;
+}
+
 function sanitizeExtractedName(text: string): string {
-  return normalizeWhitespace(
-    (text || "")
-      .replace(/\b(โทร|โทรศัพท์|เบอร์|เบอร์โทร|tel|phone)\b\.?/gi, " ")
-      .replace(/[|:_]+/g, " ")
-      .trim()
-  );
+  let value = normalizeWhitespace(text || "");
+  if (!value) return "";
+
+  value = stripThaiContactLabels(value);
+  value = value.replace(/[|:_]+/g, " ");
+  value = stripTrailingNameNoise(value);
+  value = normalizeWhitespace(value);
+
+  return value;
 }
 
 function stripGovernmentSuffixFromName(name: string): string {
@@ -1488,6 +1528,8 @@ function sanitizeSummaryName(params: {
   }
 
   safeName = sanitizeExtractedName(safeName);
+  safeName = stripThaiContactLabels(safeName);
+  safeName = stripTrailingNameNoise(safeName);
   safeName = normalizeWhitespace(safeName);
 
   if (looksLikeAddress(safeName) || looksLikePhone(safeName) || isLowConfidenceName(safeName)) {
@@ -1556,7 +1598,17 @@ function extractName(text: string): string {
     }
   }
 
-  return bestScore > 0 ? sanitizeExtractedName(bestName) : "";
+  if (bestScore <= 0) return "";
+
+  const finalName = normalizeWhitespace(
+    stripTrailingNameNoise(
+      stripThaiContactLabels(
+        sanitizeExtractedName(bestName)
+      )
+    )
+  );
+
+  return looksLikeNameValue(finalName) ? finalName : "";
 }
 
 function splitPackedThaiCustomerText(text: string): string {
