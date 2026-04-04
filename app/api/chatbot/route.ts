@@ -3176,6 +3176,29 @@ function isCompleteThaiDeliveryAddress(text: string): boolean {
   const hasProvince = hasThaiProvince(value);
   const hasZip = /\b\d{5}\b/.test(value);
 
+  const governmentDropPointReady =
+  looksLikeGovernmentDropPoint(value) &&
+  hasProvince &&
+  (hasDistrict || hasSubdistrict || hasZip);
+
+if (governmentDropPointReady) {
+  console.log("ADDRESS_COMPLETENESS_DEBUG", {
+    originalText: text,
+    value,
+    hasHouse,
+    hasSubdistrict,
+    hasDistrict,
+    hasProvince,
+    hasZip,
+    bangkokStyle: false,
+    regionalStrong: false,
+    regionalFlexible: false,
+    governmentDropPointReady: true,
+  });
+
+  return true;
+}
+
   const bangkokStyle =
     /(กรุงเทพ|กทม)/.test(value) &&
     /(เขต)/.test(value) &&
@@ -3225,28 +3248,6 @@ function getMissingAddressParts(text: string): string[] {
   const hasDistrict = hasThaiDistrict(value);
   const hasProvince = hasThaiProvince(value);
   const hasZip = /\b\d{5}\b/.test(value);
-  const governmentDropPointReady =
-  looksLikeGovernmentDropPoint(value) &&
-  hasProvince &&
-  (hasDistrict || hasSubdistrict || hasZip);
-
-if (governmentDropPointReady) {
-  console.log("ADDRESS_COMPLETENESS_DEBUG", {
-    originalText: text,
-    value,
-    hasHouse,
-    hasSubdistrict,
-    hasDistrict,
-    hasProvince,
-    hasZip,
-    bangkokStyle: false,
-    regionalStrong: false,
-    regionalFlexible: false,
-    governmentDropPointReady: true,
-  });
-
-  return [];
-}
 
   const isGovernmentLocation = looksLikeGovernmentDropPoint(value);
 
@@ -3266,22 +3267,16 @@ if (governmentDropPointReady) {
 }
 
 function hasEnoughInfoForCodSummary(customerInfo: ExtractedCustomerInfo): boolean {
-  const phone = (customerInfo.phone || "").trim();
-  const address = (customerInfo.address || "").trim();
-  const name = (customerInfo.name || "").trim();
-  const facebookName = (customerInfo.facebookName || "").trim();
-
-  const usableName = normalizeWhitespace(name || facebookName || "");
-  const usablePhone = normalizePhone(phone || "");
-  const usableAddress = normalizeWhitespace(address || "");
+  const phone = normalizePhone(customerInfo.phone || "");
+  const name = normalizeWhitespace(
+    customerInfo.name || customerInfo.facebookName || ""
+  );
+  const address = normalizeWhitespace(customerInfo.address || "");
 
   return Boolean(
-    usablePhone &&
-    usableName &&
-    (
-      isCompleteThaiDeliveryAddress(usableAddress) ||
-      getMissingAddressParts(usableAddress).length === 0
-    )
+    phone &&
+    name &&
+    hasEnoughThaiAddressForCOD(address)
   );
 }
 
