@@ -1189,17 +1189,18 @@ function extractAddress(text: string): string {
     .trim();
 
   cleaned = trimTrailingNameFromAddress(cleaned);
+  cleaned = cleanupBrokenAddressSuffix(cleaned);
   cleaned = normalizeWhitespace(cleaned);
 
   if (
     looksLikeGovernmentDropPoint(cleaned) &&
     /(อ\.|อำเภอ|จ\.|จังหวัด|\b\d{5}\b)/i.test(cleaned)
   ) {
-    return cleaned;
+    return cleanupBrokenAddressSuffix(cleaned);
   }
 
   if (looksLikeAddress(cleaned)) {
-    return cleaned;
+    return cleanupBrokenAddressSuffix(cleaned);
   }
 
   let bestCandidate = "";
@@ -1262,7 +1263,7 @@ function extractAddress(text: string): string {
   }
 
   if (bestCandidate && bestScore >= 4) {
-    return normalizeWhitespace(bestCandidate);
+    return cleanupBrokenAddressSuffix(normalizeWhitespace(bestCandidate));
   }
 
   // fallback สำหรับข้อความติดกันยาว ๆ เช่น
@@ -1282,7 +1283,7 @@ function extractAddress(text: string): string {
       const candidate = normalizeWhitespace(packed.slice(start, end));
 
       if (looksLikeAddress(candidate)) {
-        return candidate;
+        return cleanupBrokenAddressSuffix(candidate);
       }
     }
   }
@@ -1603,7 +1604,7 @@ function splitPackedThaiCustomerText(text: string): string {
     .replace(/(\*{2,}\d*|\d*\*{2,})/g, " ")
     .replace(/\s+/g, " ")
     .replace(/([ก-๙]{2,})(\d{1,4})(พหลโยธิน)/g, "$1 $2 $3")
-    .replace(/(^|\s)(ต|อ|จ)\s*(?=[ก-๙]{2,})/g, "$1$2. ")
+    .replace(/(^|\s)(ต|อ|จ)\s*(?=[ก-๙]{2,})(?!งค์การบริหารส่วนตำบล)/g, "$1$2. ")
     .replace(/([ก-๙]{2,})(คูคต|ลำลูกกา|ปทุมธานี|อยุธยา|บางนางร้า|บางปะหัน|พบพระ|ตาก)/g, "$1 $2")
     .trim();
 
@@ -1612,6 +1613,34 @@ function splitPackedThaiCustomerText(text: string): string {
 
 function removeMaskedPhoneGarbage(text: string): string {
   return normalizeWhitespace((text || "").replace(/(\*{2,}\d*|\d*\*{2,})/g, " "));
+}
+
+function cleanupBrokenAddressSuffix(text: string): string {
+  let value = normalizeWhitespace(text || "");
+  if (!value) return "";
+
+  value = value
+    // ตัดเศษที่หลุดมาจากการ split เช่น "อ. งค์การบริหารส่วนตำบล"
+    .replace(/\s+อ\.\s*งค์การบริหารส่วนตำบล\b.*$/i, "")
+    .replace(/\s+จ\.\s*งค์การบริหารส่วนตำบล\b.*$/i, "")
+    .replace(/\s+ต\.\s*งค์การบริหารส่วนตำบล\b.*$/i, "")
+
+    // ตัดเศษซ้ำท้ายข้อความที่เป็นหน่วยงานล้วน ๆ
+    .replace(/\s+(องค์การบริหารส่วนตำบล)\s*$/i, "")
+    .replace(/\s+(องค์การบริหารส่วนจังหวัด)\s*$/i, "")
+    .replace(/\s+(เทศบาลตำบล|เทศบาลเมือง|เทศบาลนคร)\s*$/i, "")
+
+    // ถ้าท้ายซ้ำเป็น "อ. พบพระ ... อ. พบพระ" หรือ "จ. ตาก ... จ. ตาก" ให้เก็บแค่ชุดแรก
+    .replace(/(\bอ\.\s*[ก-๙]+(?:\s+[ก-๙]+)?)\s+\1\b/gi, "$1")
+    .replace(/(\bจ\.\s*[ก-๙]+(?:\s+[ก-๙]+)?)\s+\1\b/gi, "$1")
+    .replace(/(\bต\.\s*[ก-๙]+(?:\s+[ก-๙]+)?)\s+\1\b/gi, "$1")
+
+    // ตัด "โทร" หรือ label ค้างท้าย
+    .replace(/\s+(โทร|เบอร์|เบอร์โทร)\.?\s*$/gi, "")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  return value;
 }
 
 function pickPackedNameCandidate(
@@ -2244,7 +2273,7 @@ function hasEnoughThaiAddressForCOD(address: string): boolean {
   const normalizedAddress = normalizeWhitespace(
     normalizeCustomerRawText(address || "")
   );
-  
+
   const governmentDropPointReady =
     looksLikeGovernmentDropPoint(normalizedAddress) &&
     /(อ\.|อำเภอ|เขต|เมือง|พบพระ|ลำลูกกา|ชุมพลบุรี|บางปะหัน)/i.test(normalizedAddress) &&
@@ -2744,6 +2773,7 @@ function buildOrderSummaryText(params: {
   }
 
   safeAddress = trimTrailingNameFromAddress(safeAddress);
+  safeAddress = cleanupBrokenAddressSuffix(safeAddress);
   safeAddress = normalizeWhitespace(safeAddress);
 
   console.log("SUMMARY_SANITIZE_DEBUG", {
@@ -3220,27 +3250,27 @@ function isCompleteThaiDeliveryAddress(text: string): boolean {
   const hasZip = /\b\d{5}\b/.test(value);
 
   const governmentDropPointReady =
-  looksLikeGovernmentDropPoint(value) &&
-  hasProvince &&
-  (hasDistrict || hasSubdistrict || hasZip);
+    looksLikeGovernmentDropPoint(value) &&
+    hasProvince &&
+    (hasDistrict || hasSubdistrict || hasZip);
 
-if (governmentDropPointReady) {
-  console.log("ADDRESS_COMPLETENESS_DEBUG", {
-    originalText: text,
-    value,
-    hasHouse,
-    hasSubdistrict,
-    hasDistrict,
-    hasProvince,
-    hasZip,
-    bangkokStyle: false,
-    regionalStrong: false,
-    regionalFlexible: false,
-    governmentDropPointReady: true,
-  });
+  if (governmentDropPointReady) {
+    console.log("ADDRESS_COMPLETENESS_DEBUG", {
+      originalText: text,
+      value,
+      hasHouse,
+      hasSubdistrict,
+      hasDistrict,
+      hasProvince,
+      hasZip,
+      bangkokStyle: false,
+      regionalStrong: false,
+      regionalFlexible: false,
+      governmentDropPointReady: true,
+    });
 
-  return true;
-}
+    return true;
+  }
 
   const bangkokStyle =
     /(กรุงเทพ|กทม)/.test(value) &&
