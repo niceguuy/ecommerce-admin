@@ -4043,7 +4043,12 @@ export async function POST(req: Request) {
       !shouldNotShowOffersAgain &&
       !hasBotAskedForCustomerInfo(history) &&
       !containsCustomerInfo(message) &&
-      (broadPriceIntent || isInterestIntent(safeMessage) || bareInterestMessage)
+      (
+        broadPriceIntent ||
+        isInterestIntent(safeMessage) ||
+        bareInterestMessage ||
+        shouldTriggerConfiguredFirstReply
+      )
     ) {
       const shouldUseConfiguredFirstReply =
         effectiveFirstReplyConfig.enabled &&
