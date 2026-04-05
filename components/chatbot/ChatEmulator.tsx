@@ -77,6 +77,11 @@ type ChatPayloadHistoryItem = {
   text: string;
 };
 
+type BotReplyItem = {
+  text?: string;
+  images?: string[];
+};
+
 function fileToBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -142,6 +147,24 @@ function normalizeTestSenderName(value: string): string {
   return value.replace(/\s+/g, " ").trim();
 }
 
+function normalizeBotReplyMessages(data: any): BotReplyItem[] {
+  if (Array.isArray(data?.messages) && data.messages.length > 0) {
+    return data.messages
+      .map((item: any) => ({
+        text: typeof item?.text === "string" ? item.text : "",
+        images: Array.isArray(item?.images) ? item.images.filter(Boolean) : [],
+      }))
+      .filter((item: BotReplyItem) => item.text || (item.images && item.images.length > 0));
+  }
+
+  return [
+    {
+      text: typeof data?.reply === "string" ? data.reply : "🤖 ไม่มีคำตอบ",
+      images: Array.isArray(data?.images) ? data.images.filter(Boolean) : [],
+    },
+  ];
+}
+
 function buildHistoryPayload(items: Message[]): ChatPayloadHistoryItem[] {
   return items.map((item) => ({
     role: item.role,
@@ -175,6 +198,7 @@ export default function ChatEmulator({
   const [imagePayloads, setImagePayloads] = useState<ChatImageInput[]>([]);
   const [loading, setLoading] = useState(false);
   const [testSenderName, setTestSenderName] = useState("");
+  const [showSenderNamePanel, setShowSenderNamePanel] = useState(false);
 
   const listRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
@@ -187,6 +211,11 @@ export default function ChatEmulator({
   const botName = useMemo(() => {
     return safeConfig.botName.trim();
   }, [safeConfig.botName]);
+
+  const senderNameSummary = useMemo(() => {
+    const normalized = normalizeTestSenderName(testSenderName);
+    return normalized || "ยังไม่ได้ใส่ชื่อผู้ทดสอบ";
+  }, [testSenderName]);
 
   useEffect(() => {
     inputRef.current?.focus();
@@ -406,14 +435,19 @@ export default function ChatEmulator({
         throw new Error(data?.error || data?.message || `HTTP ${res.status}`);
       }
 
+      const botReplyMessages = normalizeBotReplyMessages(data);
+
       setMessages((prev) => [
         ...prev,
-        createMessage({
-          role: "bot",
-          text: data.reply || "🤖 ไม่มีคำตอบ",
-          images: Array.isArray(data.images) ? data.images : [],
-        }),
+        ...botReplyMessages.map((item) =>
+          createMessage({
+            role: "bot",
+            text: item.text || "🤖 ไม่มีคำตอบ",
+            images: Array.isArray(item.images) ? item.images : [],
+          })
+        ),
       ]);
+
     } catch (error) {
       console.error(error);
       setMessages((prev) => [
@@ -461,17 +495,40 @@ export default function ChatEmulator({
           </div>
         </div>
 
-        <div className="mt-4 rounded-2xl border border-zinc-200 bg-zinc-50 p-4">
-          <div className="text-xs font-medium text-zinc-500">ชื่อผู้ทดสอบ (แทนชื่อ Facebook ลูกค้า)</div>
-          <input
-            value={testSenderName}
-            onChange={(e) => setTestSenderName(e.target.value)}
-            className="mt-2 h-11 w-full rounded-xl border border-zinc-200 bg-white px-3 text-sm text-zinc-900 outline-none placeholder:text-zinc-400"
-            placeholder="เช่น ธิติ หลำไฮสง"
-          />
-          <div className="mt-2 text-xs text-zinc-500">
-            ช่องนี้ใช้จำลองชื่อ Facebook ลูกค้าจริง เพื่อให้ fallback name ใน route ทำงานถูกต้อง
-          </div>
+        <div className="mt-4 rounded-2xl border border-zinc-200 bg-zinc-50">
+          <button
+            type="button"
+            onClick={() => setShowSenderNamePanel((prev) => !prev)}
+            className="flex w-full items-center justify-between px-4 py-3 text-left transition hover:bg-zinc-100/80"
+          >
+            <div className="min-w-0">
+              <div className="text-xs font-medium text-zinc-500">
+                ชื่อผู้ทดสอบ (แทนชื่อ Facebook ลูกค้า)
+              </div>
+              <div className="mt-1 truncate text-sm text-zinc-800">
+                {senderNameSummary}
+              </div>
+            </div>
+
+            <div className="ml-4 shrink-0 text-xs font-medium text-zinc-500">
+              {showSenderNamePanel ? "ซ่อน ▲" : "แสดง ▼"}
+            </div>
+          </button>
+
+          {showSenderNamePanel && (
+            <div className="border-t border-zinc-200 px-4 pb-4 pt-3">
+              <input
+                value={testSenderName}
+                onChange={(e) => setTestSenderName(e.target.value)}
+                className="h-11 w-full rounded-xl border border-zinc-200 bg-white px-3 text-sm text-zinc-900 outline-none placeholder:text-zinc-400"
+                placeholder="เช่น ธิติ หล้าไธสง"
+              />
+              <div className="mt-2 text-xs text-zinc-500">
+                ช่องนี้ใช้จำลองชื่อ Facebook ลูกค้าจริง เพื่อให้ fallback
+                name ใน route ทำงานถูกต้อง
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
@@ -497,11 +554,10 @@ export default function ChatEmulator({
                 className={`flex max-w-[80%] flex-col ${m.role === "user" ? "items-end" : "items-start"}`}
               >
                 <div
-                  className={`rounded-2xl px-4 py-3 text-sm leading-6 shadow-sm ${
-                    m.role === "user"
+                  className={`rounded-2xl px-4 py-3 text-sm leading-6 shadow-sm ${m.role === "user"
                       ? "rounded-br-md bg-blue-600 text-white"
                       : "rounded-bl-md border border-zinc-200 bg-white text-zinc-900"
-                  }`}
+                    }`}
                 >
                   <div className="whitespace-pre-line break-words">{m.text}</div>
 
@@ -526,9 +582,8 @@ export default function ChatEmulator({
                 </div>
 
                 <div
-                  className={`mt-1 flex items-center gap-2 px-1 text-[11px] text-zinc-500 ${
-                    m.role === "user" ? "justify-end" : "justify-start"
-                  }`}
+                  className={`mt-1 flex items-center gap-2 px-1 text-[11px] text-zinc-500 ${m.role === "user" ? "justify-end" : "justify-start"
+                    }`}
                 >
                   <span>{formatMessageTime(m.createdAt)}</span>
                   <button

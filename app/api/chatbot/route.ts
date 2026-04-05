@@ -702,7 +702,7 @@ function buildFirstReplyFromTraining(params: {
         "ตอนนี้มีโปรให้เลือกดังนี้ค่ะ ✨",
         ...offerLines,
         salesStrategy.closingQuestionStyle?.trim() ||
-          "สนใจแบบไหน แจ้งได้เลยนะคะ 😊",
+        "สนใจแบบไหน แจ้งได้เลยนะคะ 😊",
       ]
         .filter(Boolean)
         .join("\n")
@@ -710,6 +710,62 @@ function buildFirstReplyFromTraining(params: {
   }
 
   return parts.filter(Boolean).join("\n\n").trim();
+}
+
+function buildFirstReplyMessageBlocks(params: {
+  firstReplyConfig: FirstReplyConfig;
+  selectedProduct: ProductItem | null;
+  offersForFirstReply: ProductOffer[];
+  salesStrategy: SalesStrategy;
+}) {
+  const { firstReplyConfig, selectedProduct, offersForFirstReply, salesStrategy } = params;
+
+  const configuredProductImages = parseImageUrls(
+    firstReplyConfig.productIntroImagesText || ""
+  );
+
+  const configuredPromoImages = parseImageUrls(
+    firstReplyConfig.promoIntroImagesText || ""
+  );
+
+  const productText =
+    firstReplyConfig.productIntroText.trim() ||
+    selectedProduct?.salesNote?.trim() ||
+    selectedProduct?.description?.trim() ||
+    salesStrategy.openingStyle?.trim() ||
+    "";
+
+  let promoText = firstReplyConfig.promoIntroText.trim();
+
+  if (!promoText && offersForFirstReply.length > 0) {
+    const offerLines = offersForFirstReply.map((offer, index) => {
+      const priceText = offer.price ? ` ${offer.price} บาท` : "";
+      const noteText = offer.note ? ` (${offer.note})` : "";
+      return `${index + 1}. ${offer.title}${priceText}${noteText}`;
+    });
+
+    promoText = [
+      "ตอนนี้มีโปรให้เลือกดังนี้ค่ะ ✨",
+      ...offerLines,
+      salesStrategy.closingQuestionStyle?.trim() ||
+      "สนใจแบบไหน แจ้งได้เลยนะคะ 😊",
+    ]
+      .filter(Boolean)
+      .join("\n");
+  }
+
+  const blocks = [
+    {
+      text: productText.trim(),
+      images: configuredProductImages,
+    },
+    {
+      text: promoText.trim(),
+      images: configuredPromoImages,
+    },
+  ].filter((item) => item.text || item.images.length > 0);
+
+  return blocks;
 }
 
 function mergeUniqueImageUrls(...groups: string[][]): string[] {
@@ -3590,8 +3646,8 @@ export async function POST(req: Request) {
     };
     const firstReplyConfig: FirstReplyConfig = normalizeFirstReplyConfig(
       body.firstReplyConfig ||
-        body.chatbot?.firstReplyConfig ||
-        {}
+      body.chatbot?.firstReplyConfig ||
+      {}
     );
     const history: ChatHistoryItem[] = Array.isArray(body.history) ? body.history : [];
     const senderName: string = body.senderName || "";
@@ -3856,8 +3912,8 @@ export async function POST(req: Request) {
 
     const effectiveFirstReplyConfig: FirstReplyConfig = normalizeFirstReplyConfig(
       body.firstReplyConfig ||
-        (chatbot as any)?.firstReplyConfig ||
-        {}
+      (chatbot as any)?.firstReplyConfig ||
+      {}
     );
 
     const faqIntent = isFaqIntent(safeMessage) || selectedFaq !== null;
@@ -3923,24 +3979,24 @@ export async function POST(req: Request) {
       conversationState === "order_summarized" ||
       explicitOfferSelection;
 
-      const codIntent = /เก็บเงินปลายทาง|ปลายทาง|cod/i.test(
-        safeMessage || message || ""
-      );
-      
-      const shouldTriggerConfiguredFirstReply =
-        (effectiveFirstReplyConfig.triggerOnAnyProductIntent &&
-          isInterestIntent(safeMessage || message || "")) ||
-        (effectiveFirstReplyConfig.triggerOnPriceIntent && broadPriceIntent) ||
-        (effectiveFirstReplyConfig.triggerOnPromoIntent &&
-          /โปร|โปรโมชั่น|โปรโมชัน/i.test(safeMessage || message || "")) ||
-        (effectiveFirstReplyConfig.triggerOnCodIntent && codIntent);
-      
-      const shouldSuppressConfiguredFirstReply =
-        effectiveFirstReplyConfig.suppressAfterCustomerInfo &&
-        (hasAnyCustomerInfo ||
-          hasCustomerData ||
-          botAskedForInfo ||
-          containsCustomerInfo(safeMessage || message || ""));
+    const codIntent = /เก็บเงินปลายทาง|ปลายทาง|cod/i.test(
+      safeMessage || message || ""
+    );
+
+    const shouldTriggerConfiguredFirstReply =
+      (effectiveFirstReplyConfig.triggerOnAnyProductIntent &&
+        isInterestIntent(safeMessage || message || "")) ||
+      (effectiveFirstReplyConfig.triggerOnPriceIntent && broadPriceIntent) ||
+      (effectiveFirstReplyConfig.triggerOnPromoIntent &&
+        /โปร|โปรโมชั่น|โปรโมชัน/i.test(safeMessage || message || "")) ||
+      (effectiveFirstReplyConfig.triggerOnCodIntent && codIntent);
+
+    const shouldSuppressConfiguredFirstReply =
+      effectiveFirstReplyConfig.suppressAfterCustomerInfo &&
+      (hasAnyCustomerInfo ||
+        hasCustomerData ||
+        botAskedForInfo ||
+        containsCustomerInfo(safeMessage || message || ""));
     /**
      * 0) ถ้าสรุปออเดอร์ไปแล้ว และลูกค้าส่งข้อความสั้น ๆ ตามมา
      */
@@ -4009,6 +4065,13 @@ export async function POST(req: Request) {
         salesStrategy: effectiveSalesStrategy,
       });
 
+      const configuredMessageBlocks = buildFirstReplyMessageBlocks({
+        firstReplyConfig: effectiveFirstReplyConfig,
+        selectedProduct,
+        offersForFirstReply,
+        salesStrategy: effectiveSalesStrategy,
+      });
+
       const fallbackReply = buildFirstTouchReply({
         product: selectedProduct,
         offers: offersForFirstReply,
@@ -4022,11 +4085,9 @@ export async function POST(req: Request) {
 
       const firstTouchReplyImages = shouldUseConfiguredFirstReply
         ? mergeUniqueImageUrls(
-            configuredProductImages,
-            productImages,
-            configuredPromoImages,
-            firstReplyImages
-          )
+          configuredProductImages,
+          configuredPromoImages
+        )
         : mergeUniqueImageUrls(productImages, firstReplyImages);
 
       console.log("CHATBOT_RETURN_FIRST_TOUCH_DEBUG", {
@@ -4038,6 +4099,20 @@ export async function POST(req: Request) {
         replyPreview: reply?.slice(0, 120) || "",
         firstTouchReplyImages,
       });
+
+      if (shouldUseConfiguredFirstReply && configuredMessageBlocks.length > 0) {
+        const fallbackReplyText =
+          configuredMessageBlocks
+            .map((item) => item.text)
+            .filter(Boolean)
+            .join("\n\n") || reply;
+
+        return NextResponse.json({
+          reply: fallbackReplyText,
+          images: firstTouchReplyImages,
+          messages: configuredMessageBlocks,
+        });
+      }
 
       return NextResponse.json({
         reply,

@@ -247,6 +247,42 @@ async function sendFacebookImageMessage(params: {
   return data;
 }
 
+function extractBotMessagesFromChatbotResult(chatbotResult: any): Array<{
+  text: string;
+  images: string[];
+}> {
+  if (Array.isArray(chatbotResult?.messages) && chatbotResult.messages.length > 0) {
+    return chatbotResult.messages.map((item: any) => ({
+      text: typeof item?.text === "string" ? item.text.trim() : "",
+      images: Array.isArray(item?.images)
+        ? item.images
+            .map((img: any) =>
+              typeof img === "string"
+                ? img.trim()
+                : typeof img?.url === "string"
+                  ? img.url.trim()
+                  : ""
+            )
+            .filter((url: string) => Boolean(url) && /^https?:\/\//i.test(url))
+        : [],
+    }));
+  }
+
+  const fallbackText =
+    typeof chatbotResult?.reply === "string" && chatbotResult.reply.trim()
+      ? chatbotResult.reply.trim()
+      : "สวัสดีค่ะ ตอนนี้ระบบยังไม่มีคำตอบที่เหมาะสม รบกวนทักใหม่อีกครั้งนะคะ";
+
+  const fallbackImages = extractImageUrlsFromChatbotResult(chatbotResult);
+
+  return [
+    {
+      text: fallbackText,
+      images: fallbackImages,
+    },
+  ];
+}
+
 function extractImageUrlsFromChatbotResult(chatbotResult: any): string[] {
   const rawImages: any[] = Array.isArray(chatbotResult?.images)
     ? chatbotResult.images
@@ -455,31 +491,34 @@ export async function POST(req: NextRequest) {
                 : 0,
             });
 
-            const replyText =
-              typeof chatbotResult?.reply === "string" && chatbotResult.reply.trim()
-                ? chatbotResult.reply.trim()
-                : "สวัสดีค่ะ ตอนนี้ระบบยังไม่มีคำตอบที่เหมาะสม รบกวนทักใหม่อีกครั้งนะคะ";
+            const botMessages = extractBotMessagesFromChatbotResult(chatbotResult);
 
-            const replyImages = extractImageUrlsFromChatbotResult(chatbotResult);
+            for (const botMessage of botMessages) {
+              for (const imageUrl of botMessage.images) {
+                await sendFacebookImageMessage({
+                  recipientId: senderId,
+                  imageUrl,
+                  pageAccessToken,
+                });
+              }
 
-            for (const imageUrl of replyImages) {
-              await sendFacebookImageMessage({
-                recipientId: senderId,
-                imageUrl,
-                pageAccessToken,
-              });
+              if (botMessage.text) {
+                await sendFacebookTextMessage({
+                  recipientId: senderId,
+                  text: botMessage.text,
+                  pageAccessToken,
+                });
+              }
             }
 
-            await sendFacebookTextMessage({
-              recipientId: senderId,
-              text: replyText,
-              pageAccessToken,
-            });
-
-            const botHistoryText =
-              replyImages.length > 0
-                ? `${replyText}\n[images]\n${replyImages.join("\n")}`
-                : replyText;
+            const botHistoryText = botMessages
+              .map((item) =>
+                item.images.length > 0
+                  ? `${item.text}\n[images]\n${item.images.join("\n")}`
+                  : item.text
+              )
+              .filter(Boolean)
+              .join("\n\n---\n\n");
 
             await appendConversationItems({
               botId: bot.id,
