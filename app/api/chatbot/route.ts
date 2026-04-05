@@ -56,6 +56,19 @@ type SalesStrategy = {
   urgencyStyle: string;
 };
 
+type FirstReplyConfig = {
+  enabled: boolean;
+  triggerOnAnyProductIntent: boolean;
+  triggerOnPriceIntent: boolean;
+  triggerOnPromoIntent: boolean;
+  triggerOnCodIntent: boolean;
+  productIntroText: string;
+  productIntroImagesText: string;
+  promoIntroText: string;
+  promoIntroImagesText: string;
+  suppressAfterCustomerInfo: boolean;
+};
+
 type ChatHistoryItem = {
   role: "user" | "bot";
   text: string;
@@ -619,6 +632,84 @@ function recentBotText(history: ChatHistoryItem[]): string {
 function isFirstCustomerMessage(history: ChatHistoryItem[]): boolean {
   const userMessages = history.filter((item) => item.role === "user");
   return userMessages.length === 0;
+}
+
+function normalizeFirstReplyConfig(config: any = {}): FirstReplyConfig {
+  return {
+    enabled:
+      typeof config?.enabled === "boolean" ? config.enabled : true,
+    triggerOnAnyProductIntent:
+      typeof config?.triggerOnAnyProductIntent === "boolean"
+        ? config.triggerOnAnyProductIntent
+        : true,
+    triggerOnPriceIntent:
+      typeof config?.triggerOnPriceIntent === "boolean"
+        ? config.triggerOnPriceIntent
+        : true,
+    triggerOnPromoIntent:
+      typeof config?.triggerOnPromoIntent === "boolean"
+        ? config.triggerOnPromoIntent
+        : true,
+    triggerOnCodIntent:
+      typeof config?.triggerOnCodIntent === "boolean"
+        ? config.triggerOnCodIntent
+        : true,
+    productIntroText: config?.productIntroText || "",
+    productIntroImagesText: config?.productIntroImagesText || "",
+    promoIntroText: config?.promoIntroText || "",
+    promoIntroImagesText: config?.promoIntroImagesText || "",
+    suppressAfterCustomerInfo:
+      typeof config?.suppressAfterCustomerInfo === "boolean"
+        ? config.suppressAfterCustomerInfo
+        : true,
+  };
+}
+
+function buildFirstReplyFromTraining(params: {
+  firstReplyConfig: FirstReplyConfig;
+  selectedProduct: ProductItem | null;
+  offersForFirstReply: ProductOffer[];
+  salesStrategy: SalesStrategy;
+}): string {
+  const { firstReplyConfig, selectedProduct, offersForFirstReply, salesStrategy } = params;
+
+  const parts: string[] = [];
+
+  if (firstReplyConfig.productIntroText.trim()) {
+    parts.push(firstReplyConfig.productIntroText.trim());
+  } else if (selectedProduct) {
+    const fallbackProductIntro =
+      selectedProduct.salesNote?.trim() ||
+      selectedProduct.description?.trim() ||
+      salesStrategy.openingStyle?.trim() ||
+      "";
+    if (fallbackProductIntro) {
+      parts.push(fallbackProductIntro);
+    }
+  }
+
+  if (firstReplyConfig.promoIntroText.trim()) {
+    parts.push(firstReplyConfig.promoIntroText.trim());
+  } else if (offersForFirstReply.length > 0) {
+    const offerLines = offersForFirstReply.map((offer, index) => {
+      const priceText = offer.price ? ` ${offer.price} บาท` : "";
+      const noteText = offer.note ? ` (${offer.note})` : "";
+      return `${index + 1}. ${offer.title}${priceText}${noteText}`;
+    });
+
+    parts.push(
+      [
+        "ตอนนี้มีโปรให้เลือกดังนี้ค่ะ ✨",
+        ...offerLines,
+        salesStrategy.closingQuestionStyle?.trim() ||
+          "สนใจแบบไหน แจ้งได้เลยนะคะ 😊",
+      ]
+        .filter(Boolean)
+        .join("\n")
+    );
+  }
+
+  return parts.filter(Boolean).join("\n\n").trim();
 }
 
 function mergeUniqueImageUrls(...groups: string[][]): string[] {
@@ -1189,17 +1280,18 @@ function extractAddress(text: string): string {
     .trim();
 
   cleaned = trimTrailingNameFromAddress(cleaned);
+  cleaned = cleanupBrokenAddressSuffix(cleaned);
   cleaned = normalizeWhitespace(cleaned);
 
   if (
     looksLikeGovernmentDropPoint(cleaned) &&
     /(อ\.|อำเภอ|จ\.|จังหวัด|\b\d{5}\b)/i.test(cleaned)
   ) {
-    return cleaned;
+    return cleanupBrokenAddressSuffix(cleaned);
   }
 
   if (looksLikeAddress(cleaned)) {
-    return cleaned;
+    return cleanupBrokenAddressSuffix(cleaned);
   }
 
   let bestCandidate = "";
@@ -1262,7 +1354,7 @@ function extractAddress(text: string): string {
   }
 
   if (bestCandidate && bestScore >= 4) {
-    return normalizeWhitespace(bestCandidate);
+    return cleanupBrokenAddressSuffix(normalizeWhitespace(bestCandidate));
   }
 
   // fallback สำหรับข้อความติดกันยาว ๆ เช่น
@@ -1282,7 +1374,7 @@ function extractAddress(text: string): string {
       const candidate = normalizeWhitespace(packed.slice(start, end));
 
       if (looksLikeAddress(candidate)) {
-        return candidate;
+        return cleanupBrokenAddressSuffix(candidate);
       }
     }
   }
@@ -1372,8 +1464,7 @@ function removeCommonOrderWords(text: string): string {
 function cleanPossibleNameLine(line: string): string {
   let value = normalizeCustomerRawText(line);
 
-  value = value.replace(/^ชื่อผู้รับ[:\s]*/i, "");
-  value = value.replace(/^ชื่อ[:\s]*/i, "");
+  value = stripThaiContactLabels(value);
   value = value.replace(/(?:\+66|66|0)\d{8,9}/g, " ");
 
   value = removeCommonOrderWords(value);
@@ -1393,12 +1484,14 @@ function cleanPossibleNameLine(line: string): string {
   }
 
   value = value
-    .replace(/\b(โทร|โทรศัพท์|เบอร์|เบอร์โทร)\b\.?/gi, " ")
-    .replace(/\b(พหลโยธิน|คูคต|ลาดลูกกา|ลำลูกกา|ปทุมธานี|อยุธยา|พระนครศรีอยุธยา|ตาก|สุรินทร์|สระแก้ว|วัฒนานคร|บางนางร้า|บางปะหัน|พบพระ|ชุมพลบุรี|สระขุด)\b/gi, " ")
+    .replace(/(^|[\s(])(?:พหลโยธิน|คูคต|ลาดลูกกา|ลำลูกกา|ปทุมธานี|อยุธยา|พระนครศรีอยุธยา|ตาก|สุรินทร์|สระแก้ว|วัฒนานคร|บางนางร้า|บางปะหัน|พบพระ|ชุมพลบุรี|สระขุด)(?=[\s)]|$)/gi, "$1 ")
     .replace(/[,:;|/\\]+/g, " ")
     .replace(/\b\d+\b/g, " ")
     .replace(/\s+/g, " ")
     .trim();
+
+  value = stripThaiContactLabels(value);
+  value = stripTrailingNameNoise(value);
 
   return value;
 }
@@ -1440,13 +1533,52 @@ function looksLikeNameValue(text: string): boolean {
   return true;
 }
 
+function stripThaiContactLabels(text: string): string {
+  let value = normalizeWhitespace(text || "");
+  if (!value) return "";
+
+  value = value
+    // ลบ label ที่มักโผล่หน้า/กลาง/ท้ายข้อความชื่อ
+    .replace(/(^|[\s(])(?:ชื่อผู้รับ|ชื่อ|โทรศัพท์|เบอร์โทร|เบอร์|โทร|tel|phone)(?=[\s.:：\-)]|$)/gi, "$1 ")
+    .replace(/(^|[\s(])(?:ผู้รับ|ผู้รับสินค้า)(?=[\s.:：\-)]|$)/gi, "$1 ")
+
+    // ลบรูปแบบมีเครื่องหมายต่อท้าย เช่น "โทร." "เบอร์:" "ชื่อ -"
+    .replace(/(^|[\s(])(?:ชื่อผู้รับ|ชื่อ|โทรศัพท์|เบอร์โทร|เบอร์|โทร|tel|phone)\s*[.:：\-]+/gi, "$1 ")
+
+    // ลบ colon / dash ที่ค้างหลังลบ label
+    .replace(/\s+[.:：\-]+\s*/g, " ")
+
+    .replace(/\s+/g, " ")
+    .trim();
+
+  return value;
+}
+
+function stripTrailingNameNoise(text: string): string {
+  let value = normalizeWhitespace(text || "");
+  if (!value) return "";
+
+  value = value
+    // ตัด suffix ที่ยังเหลือท้ายชื่อ
+    .replace(/\s*(?:โทรศัพท์|เบอร์โทร|เบอร์|โทร|tel|phone)\.?\s*$/gi, "")
+    .replace(/\s*(?:ชื่อผู้รับ|ชื่อ)\.?\s*$/gi, "")
+    .replace(/\s*[-:：|,.;]+\s*$/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  return value;
+}
+
 function sanitizeExtractedName(text: string): string {
-  return normalizeWhitespace(
-    (text || "")
-      .replace(/\b(โทร|โทรศัพท์|เบอร์|เบอร์โทร|tel|phone)\b\.?/gi, " ")
-      .replace(/[|:_]+/g, " ")
-      .trim()
-  );
+  let value = normalizeWhitespace(text || "");
+  if (!value) return "";
+
+  value = stripThaiContactLabels(value);
+  value = value.replace(/[|:_]+/g, " ");
+  value = stripTrailingNameNoise(value);
+  value = normalizeWhitespace(value);
+
+  return value;
 }
 
 function stripGovernmentSuffixFromName(name: string): string {
@@ -1487,6 +1619,8 @@ function sanitizeSummaryName(params: {
   }
 
   safeName = sanitizeExtractedName(safeName);
+  safeName = stripThaiContactLabels(safeName);
+  safeName = stripTrailingNameNoise(safeName);
   safeName = normalizeWhitespace(safeName);
 
   if (looksLikeAddress(safeName) || looksLikePhone(safeName) || isLowConfidenceName(safeName)) {
@@ -1555,7 +1689,17 @@ function extractName(text: string): string {
     }
   }
 
-  return bestScore > 0 ? sanitizeExtractedName(bestName) : "";
+  if (bestScore <= 0) return "";
+
+  const finalName = normalizeWhitespace(
+    stripTrailingNameNoise(
+      stripThaiContactLabels(
+        sanitizeExtractedName(bestName)
+      )
+    )
+  );
+
+  return looksLikeNameValue(finalName) ? finalName : "";
 }
 
 function splitPackedThaiCustomerText(text: string): string {
@@ -1603,7 +1747,7 @@ function splitPackedThaiCustomerText(text: string): string {
     .replace(/(\*{2,}\d*|\d*\*{2,})/g, " ")
     .replace(/\s+/g, " ")
     .replace(/([ก-๙]{2,})(\d{1,4})(พหลโยธิน)/g, "$1 $2 $3")
-    .replace(/(^|\s)(ต|อ|จ)\s*(?=[ก-๙]{2,})/g, "$1$2. ")
+    .replace(/(^|\s)(ต|อ|จ)\s*(?=[ก-๙]{2,})(?!งค์การบริหารส่วนตำบล)/g, "$1$2. ")
     .replace(/([ก-๙]{2,})(คูคต|ลำลูกกา|ปทุมธานี|อยุธยา|บางนางร้า|บางปะหัน|พบพระ|ตาก)/g, "$1 $2")
     .trim();
 
@@ -1612,6 +1756,41 @@ function splitPackedThaiCustomerText(text: string): string {
 
 function removeMaskedPhoneGarbage(text: string): string {
   return normalizeWhitespace((text || "").replace(/(\*{2,}\d*|\d*\*{2,})/g, " "));
+}
+
+function cleanupBrokenAddressSuffix(text: string): string {
+  let value = normalizeWhitespace(text || "");
+  if (!value) return "";
+
+  value = value
+    // ตัดเศษที่หลุดมาจากการ split เช่น "อ. งค์การบริหารส่วนตำบล"
+    .replace(/\s+อ\.\s*งค์การบริหารส่วนตำบล\b.*$/i, "")
+    .replace(/\s+จ\.\s*งค์การบริหารส่วนตำบล\b.*$/i, "")
+    .replace(/\s+ต\.\s*งค์การบริหารส่วนตำบล\b.*$/i, "")
+
+    // ตัดเศษซ้ำท้ายข้อความที่เป็นหน่วยงานล้วน ๆ
+    .replace(/\s+(องค์การบริหารส่วนตำบล)\s*$/i, "")
+    .replace(/\s+(องค์การบริหารส่วนจังหวัด)\s*$/i, "")
+    .replace(/\s+(เทศบาลตำบล|เทศบาลเมือง|เทศบาลนคร)\s*$/i, "")
+
+    // ถ้าท้ายซ้ำเป็น "อ. พบพระ ... อ. พบพระ" หรือ "จ. ตาก ... จ. ตาก" ให้เก็บแค่ชุดแรก
+    .replace(/(\bอ\.\s*[ก-๙]+(?:\s+[ก-๙]+)?)\s+\1\b/gi, "$1")
+    .replace(/(\bจ\.\s*[ก-๙]+(?:\s+[ก-๙]+)?)\s+\1\b/gi, "$1")
+    .replace(/(\bต\.\s*[ก-๙]+(?:\s+[ก-๙]+)?)\s+\1\b/gi, "$1")
+
+    // ตัด label ค้างท้าย
+    .replace(/\s+(โทร|เบอร์|เบอร์โทร)\.?\s*$/gi, "")
+
+    // ตัด marker ลอยท้าย เช่น "ต." / "อ." / "จ." หรือ "ต. อ. จ."
+    .replace(/\s+(?:ต\.?|อ\.?|จ\.?)(?:\s+(?:ต\.?|อ\.?|จ\.?))*\s*$/gi, "")
+
+    // ตัด marker ลอยท้ายแบบไม่มีจุด เช่น "ต อ จ"
+    .replace(/\s+(?:ต|อ|จ)(?:\s+(?:ต|อ|จ))*\s*$/gi, "")
+
+    .replace(/\s+/g, " ")
+    .trim();
+
+  return value;
 }
 
 function pickPackedNameCandidate(
@@ -1693,7 +1872,8 @@ function repairExtractedCustomerInfoFromRawText(
     info.address || "",
     extractAddress(normalizedRaw)
   );
-
+  repairedAddress = cleanupBrokenAddressSuffix(repairedAddress);
+  repairedAddress = normalizeWhitespace(repairedAddress);
   repairedAddress = removeMaskedPhoneGarbage(repairedAddress);
   repairedAddress = normalizeWhitespace(repairedAddress);
 
@@ -2244,7 +2424,7 @@ function hasEnoughThaiAddressForCOD(address: string): boolean {
   const normalizedAddress = normalizeWhitespace(
     normalizeCustomerRawText(address || "")
   );
-  
+
   const governmentDropPointReady =
     looksLikeGovernmentDropPoint(normalizedAddress) &&
     /(อ\.|อำเภอ|เขต|เมือง|พบพระ|ลำลูกกา|ชุมพลบุรี|บางปะหัน)/i.test(normalizedAddress) &&
@@ -2744,7 +2924,9 @@ function buildOrderSummaryText(params: {
   }
 
   safeAddress = trimTrailingNameFromAddress(safeAddress);
+  safeAddress = cleanupBrokenAddressSuffix(safeAddress);
   safeAddress = normalizeWhitespace(safeAddress);
+  safeAddress = cleanupBrokenAddressSuffix(safeAddress);
 
   console.log("SUMMARY_SANITIZE_DEBUG", {
     rawName: customerInfo.name,
@@ -3220,27 +3402,27 @@ function isCompleteThaiDeliveryAddress(text: string): boolean {
   const hasZip = /\b\d{5}\b/.test(value);
 
   const governmentDropPointReady =
-  looksLikeGovernmentDropPoint(value) &&
-  hasProvince &&
-  (hasDistrict || hasSubdistrict || hasZip);
+    looksLikeGovernmentDropPoint(value) &&
+    hasProvince &&
+    (hasDistrict || hasSubdistrict || hasZip);
 
-if (governmentDropPointReady) {
-  console.log("ADDRESS_COMPLETENESS_DEBUG", {
-    originalText: text,
-    value,
-    hasHouse,
-    hasSubdistrict,
-    hasDistrict,
-    hasProvince,
-    hasZip,
-    bangkokStyle: false,
-    regionalStrong: false,
-    regionalFlexible: false,
-    governmentDropPointReady: true,
-  });
+  if (governmentDropPointReady) {
+    console.log("ADDRESS_COMPLETENESS_DEBUG", {
+      originalText: text,
+      value,
+      hasHouse,
+      hasSubdistrict,
+      hasDistrict,
+      hasProvince,
+      hasZip,
+      bangkokStyle: false,
+      regionalStrong: false,
+      regionalFlexible: false,
+      governmentDropPointReady: true,
+    });
 
-  return true;
-}
+    return true;
+  }
 
   const bangkokStyle =
     /(กรุงเทพ|กทม)/.test(value) &&
@@ -3406,6 +3588,11 @@ export async function POST(req: Request) {
       enableUrgency: false,
       urgencyStyle: "",
     };
+    const firstReplyConfig: FirstReplyConfig = normalizeFirstReplyConfig(
+      body.firstReplyConfig ||
+        body.chatbot?.firstReplyConfig ||
+        {}
+    );
     const history: ChatHistoryItem[] = Array.isArray(body.history) ? body.history : [];
     const senderName: string = body.senderName || "";
     const chatbot = botId ? await getChatbotById(botId) : null;
@@ -3667,6 +3854,12 @@ export async function POST(req: Request) {
       firstReplyImages
     );
 
+    const effectiveFirstReplyConfig: FirstReplyConfig = normalizeFirstReplyConfig(
+      body.firstReplyConfig ||
+        (chatbot as any)?.firstReplyConfig ||
+        {}
+    );
+
     const faqIntent = isFaqIntent(safeMessage) || selectedFaq !== null;
     const broadPriceIntent = isBroadPriceIntent(safeMessage);
     const explicitOfferSelection = isExplicitOfferSelection(safeMessage);
@@ -3730,6 +3923,24 @@ export async function POST(req: Request) {
       conversationState === "order_summarized" ||
       explicitOfferSelection;
 
+      const codIntent = /เก็บเงินปลายทาง|ปลายทาง|cod/i.test(
+        safeMessage || message || ""
+      );
+      
+      const shouldTriggerConfiguredFirstReply =
+        (effectiveFirstReplyConfig.triggerOnAnyProductIntent &&
+          isInterestIntent(safeMessage || message || "")) ||
+        (effectiveFirstReplyConfig.triggerOnPriceIntent && broadPriceIntent) ||
+        (effectiveFirstReplyConfig.triggerOnPromoIntent &&
+          /โปร|โปรโมชั่น|โปรโมชัน/i.test(safeMessage || message || "")) ||
+        (effectiveFirstReplyConfig.triggerOnCodIntent && codIntent);
+      
+      const shouldSuppressConfiguredFirstReply =
+        effectiveFirstReplyConfig.suppressAfterCustomerInfo &&
+        (hasAnyCustomerInfo ||
+          hasCustomerData ||
+          botAskedForInfo ||
+          containsCustomerInfo(safeMessage || message || ""));
     /**
      * 0) ถ้าสรุปออเดอร์ไปแล้ว และลูกค้าส่งข้อความสั้น ๆ ตามมา
      */
@@ -3778,18 +3989,52 @@ export async function POST(req: Request) {
       !containsCustomerInfo(message) &&
       (broadPriceIntent || isInterestIntent(safeMessage) || bareInterestMessage)
     ) {
-      const reply = buildFirstTouchReply({
+      const shouldUseConfiguredFirstReply =
+        effectiveFirstReplyConfig.enabled &&
+        shouldTriggerConfiguredFirstReply &&
+        !shouldSuppressConfiguredFirstReply;
+
+      const configuredProductImages = parseImageUrls(
+        effectiveFirstReplyConfig.productIntroImagesText || ""
+      );
+
+      const configuredPromoImages = parseImageUrls(
+        effectiveFirstReplyConfig.promoIntroImagesText || ""
+      );
+
+      const configuredReply = buildFirstReplyFromTraining({
+        firstReplyConfig: effectiveFirstReplyConfig,
+        selectedProduct,
+        offersForFirstReply,
+        salesStrategy: effectiveSalesStrategy,
+      });
+
+      const fallbackReply = buildFirstTouchReply({
         product: selectedProduct,
         offers: offersForFirstReply,
         salesStrategy: effectiveSalesStrategy,
       });
 
-      const firstTouchReplyImages = mergeUniqueImageUrls(
-        productImages,
-        firstReplyImages
-      );
+      const reply =
+        shouldUseConfiguredFirstReply && configuredReply.trim()
+          ? configuredReply
+          : fallbackReply;
+
+      const firstTouchReplyImages = shouldUseConfiguredFirstReply
+        ? mergeUniqueImageUrls(
+            configuredProductImages,
+            productImages,
+            configuredPromoImages,
+            firstReplyImages
+          )
+        : mergeUniqueImageUrls(productImages, firstReplyImages);
 
       console.log("CHATBOT_RETURN_FIRST_TOUCH_DEBUG", {
+        usedConfiguredFirstReply: shouldUseConfiguredFirstReply,
+        shouldTriggerConfiguredFirstReply,
+        shouldSuppressConfiguredFirstReply,
+        configuredProductImages,
+        configuredPromoImages,
         replyPreview: reply?.slice(0, 120) || "",
         firstTouchReplyImages,
       });
