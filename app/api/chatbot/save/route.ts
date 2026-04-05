@@ -1,6 +1,39 @@
 import { NextResponse } from "next/server";
 import { getChatbots, saveChatbots } from "@/lib/chatbot-store";
 
+function normalizeFirstReplyConfig(firstReplyConfig: any = {}) {
+  return {
+    enabled:
+      typeof firstReplyConfig?.enabled === "boolean"
+        ? firstReplyConfig.enabled
+        : true,
+    triggerOnAnyProductIntent:
+      typeof firstReplyConfig?.triggerOnAnyProductIntent === "boolean"
+        ? firstReplyConfig.triggerOnAnyProductIntent
+        : true,
+    triggerOnPriceIntent:
+      typeof firstReplyConfig?.triggerOnPriceIntent === "boolean"
+        ? firstReplyConfig.triggerOnPriceIntent
+        : true,
+    triggerOnPromoIntent:
+      typeof firstReplyConfig?.triggerOnPromoIntent === "boolean"
+        ? firstReplyConfig.triggerOnPromoIntent
+        : true,
+    triggerOnCodIntent:
+      typeof firstReplyConfig?.triggerOnCodIntent === "boolean"
+        ? firstReplyConfig.triggerOnCodIntent
+        : true,
+    productIntroText: firstReplyConfig?.productIntroText || "",
+    productIntroImagesText: firstReplyConfig?.productIntroImagesText || "",
+    promoIntroText: firstReplyConfig?.promoIntroText || "",
+    promoIntroImagesText: firstReplyConfig?.promoIntroImagesText || "",
+    suppressAfterCustomerInfo:
+      typeof firstReplyConfig?.suppressAfterCustomerInfo === "boolean"
+        ? firstReplyConfig.suppressAfterCustomerInfo
+        : true,
+  };
+}
+
 function normalizeConnectionConfig(connection: any = {}) {
   return {
     geminiApiKey: connection?.geminiApiKey || "",
@@ -46,6 +79,7 @@ export async function POST(req: Request) {
     );
 
     const salesStrategy = body.salesStrategy || null;
+    const firstReplyConfig = normalizeFirstReplyConfig(body.firstReplyConfig);
     const connection = normalizeConnectionConfig(body.connection);
 
     if (!botId) {
@@ -94,6 +128,7 @@ export async function POST(req: Request) {
         },
         connectionConfig: connection,
         products,
+        firstReplyConfig,
         salesStrategy: {
           ...(salesStrategy || {}),
           enableUrgency:
@@ -159,6 +194,10 @@ export async function POST(req: Request) {
           connectionConfig: {
             ...normalizeConnectionConfig(bot.connectionConfig),
             ...connection,
+          },
+          firstReplyConfig: {
+            ...(bot.firstReplyConfig || {}),
+            ...firstReplyConfig,
           },
           products,
           salesStrategy: {

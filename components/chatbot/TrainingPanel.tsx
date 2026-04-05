@@ -65,6 +65,19 @@ type SalesStrategy = {
   urgencyStyle: string;
 };
 
+type FirstReplyConfig = {
+  enabled: boolean;
+  triggerOnAnyProductIntent: boolean;
+  triggerOnPriceIntent: boolean;
+  triggerOnPromoIntent: boolean;
+  triggerOnCodIntent: boolean;
+  productIntroText: string;
+  productIntroImagesText: string;
+  promoIntroText: string;
+  promoIntroImagesText: string;
+  suppressAfterCustomerInfo: boolean;
+};
+
 type ConnectionConfig = {
   geminiApiKey: string;
   facebookPageId: string;
@@ -83,6 +96,21 @@ type TrainingPanelProps = {
   onChange: (value: TrainingConfig) => void;
   botId?: string;
 };
+
+function createDefaultFirstReplyConfig(): FirstReplyConfig {
+  return {
+    enabled: true,
+    triggerOnAnyProductIntent: true,
+    triggerOnPriceIntent: true,
+    triggerOnPromoIntent: true,
+    triggerOnCodIntent: true,
+    productIntroText: "",
+    productIntroImagesText: "",
+    promoIntroText: "",
+    promoIntroImagesText: "",
+    suppressAfterCustomerInfo: true,
+  };
+}
 
 function createDefaultOffer(id: number): ProductOffer {
   return {
@@ -276,6 +304,9 @@ export default function TrainingPanel({
     enableUrgency: false,
     urgencyStyle: "",
   });
+  const [firstReplyConfig, setFirstReplyConfig] = useState<FirstReplyConfig>(
+    createDefaultFirstReplyConfig()
+  );
 
   const [products, setProducts] = useState<ProductItem[]>([]);
   const [saveMessage, setSaveMessage] = useState("");
@@ -305,6 +336,9 @@ export default function TrainingPanel({
     const savedProducts = localStorage.getItem(`chatbotProducts_${safeBotId}`);
     const savedStrategy = localStorage.getItem(`chatbotSalesStrategy_${safeBotId}`);
     const savedConnection = localStorage.getItem(`chatbotConnection_${safeBotId}`);
+    const savedFirstReplyConfig = localStorage.getItem(
+      `chatbotFirstReplyConfig_${safeBotId}`
+    );
     const savedEnableAiCustomerParse = localStorage.getItem(
       `chatbotEnableAiCustomerParse_${safeBotId}`
     );
@@ -393,6 +427,45 @@ export default function TrainingPanel({
       }
     }
 
+    if (savedFirstReplyConfig) {
+      try {
+        const parsed = JSON.parse(savedFirstReplyConfig);
+        setFirstReplyConfig({
+          enabled:
+            typeof parsed?.enabled === "boolean" ? parsed.enabled : true,
+          triggerOnAnyProductIntent:
+            typeof parsed?.triggerOnAnyProductIntent === "boolean"
+              ? parsed.triggerOnAnyProductIntent
+              : true,
+          triggerOnPriceIntent:
+            typeof parsed?.triggerOnPriceIntent === "boolean"
+              ? parsed.triggerOnPriceIntent
+              : true,
+          triggerOnPromoIntent:
+            typeof parsed?.triggerOnPromoIntent === "boolean"
+              ? parsed.triggerOnPromoIntent
+              : true,
+          triggerOnCodIntent:
+            typeof parsed?.triggerOnCodIntent === "boolean"
+              ? parsed.triggerOnCodIntent
+              : true,
+          productIntroText: parsed?.productIntroText || "",
+          productIntroImagesText: parsed?.productIntroImagesText || "",
+          promoIntroText: parsed?.promoIntroText || "",
+          promoIntroImagesText: parsed?.promoIntroImagesText || "",
+          suppressAfterCustomerInfo:
+            typeof parsed?.suppressAfterCustomerInfo === "boolean"
+              ? parsed.suppressAfterCustomerInfo
+              : true,
+        });
+      } catch (error) {
+        console.error("โหลด first reply config ไม่สำเร็จ", error);
+        setFirstReplyConfig(createDefaultFirstReplyConfig());
+      }
+    } else {
+      setFirstReplyConfig(createDefaultFirstReplyConfig());
+    }
+
     setIsMounted(true);
 
     return () => {
@@ -460,6 +533,16 @@ export default function TrainingPanel({
     newValue: string | boolean
   ) {
     setSalesStrategy((prev) => ({
+      ...prev,
+      [field]: newValue,
+    }));
+  }
+
+  function updateFirstReplyConfig(
+    field: keyof FirstReplyConfig,
+    newValue: string | boolean
+  ) {
+    setFirstReplyConfig((prev) => ({
       ...prev,
       [field]: newValue,
     }));
@@ -725,6 +808,48 @@ export default function TrainingPanel({
     }
   }
 
+  async function handleFirstReplyProductImageUpload(file: File) {
+    try {
+      setUploadingKey("first-reply-product");
+
+      const publicUrl = await uploadImageToSupabase(file, "first-reply-products");
+
+      setFirstReplyConfig((prev) => ({
+        ...prev,
+        productIntroImagesText: appendImageUrl(
+          prev.productIntroImagesText,
+          publicUrl
+        ),
+      }));
+    } catch (error) {
+      console.error(error);
+      alert("อัปโหลดรูปเปิดสินค้าทักแรกไม่สำเร็จ");
+    } finally {
+      setUploadingKey("");
+    }
+  }
+
+  async function handleFirstReplyPromoImageUpload(file: File) {
+    try {
+      setUploadingKey("first-reply-promo");
+
+      const publicUrl = await uploadImageToSupabase(file, "first-reply-promos");
+
+      setFirstReplyConfig((prev) => ({
+        ...prev,
+        promoIntroImagesText: appendImageUrl(
+          prev.promoIntroImagesText,
+          publicUrl
+        ),
+      }));
+    } catch (error) {
+      console.error(error);
+      alert("อัปโหลดรูปเปิดโปรทักแรกไม่สำเร็จ");
+    } finally {
+      setUploadingKey("");
+    }
+  }
+
   async function handleProductImageUpload(productId: number, file: File) {
     try {
       setUploadingKey(`product-${productId}`);
@@ -793,6 +918,7 @@ export default function TrainingPanel({
           botRules,
           products,
           salesStrategy,
+          firstReplyConfig,
           connection,
           botName: value.botName,
           welcomeMessage: value.welcomeMessage,
@@ -824,6 +950,10 @@ export default function TrainingPanel({
       localStorage.setItem(
         `chatbotSalesStrategy_${safeBotId}`,
         JSON.stringify(salesStrategy)
+      );
+      localStorage.setItem(
+        `chatbotFirstReplyConfig_${safeBotId}`,
+        JSON.stringify(firstReplyConfig)
       );
       localStorage.setItem(
         `chatbotProducts_${safeBotId}`,
@@ -1102,6 +1232,244 @@ export default function TrainingPanel({
                     className={inputClassName}
                   />
                 </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="rounded-3xl border border-zinc-800 bg-zinc-950 p-6 shadow-[0_10px_40px_rgba(0,0,0,0.22)] space-y-5">
+          <div>
+            <h3 className="text-2xl font-semibold text-white">
+              First Reply Config
+            </h3>
+            <p className="mt-2 text-sm text-zinc-400">
+              ตั้งค่าข้อความทักแรกสำหรับลูกค้าที่ทักมาเกี่ยวกับสินค้า ราคา โปร
+              หรือเก็บเงินปลายทาง โดยไม่ยึดแค่คำว่า สนใจ
+            </p>
+          </div>
+
+          <label className="flex items-center justify-between rounded-2xl border border-zinc-800 bg-zinc-900/60 px-4 py-4">
+            <div>
+              <p className="text-sm font-medium text-white">
+                เปิดใช้ first reply อัตโนมัติ
+              </p>
+              <p className="mt-1 text-xs text-zinc-400">
+                ถ้าเปิด บอทจะใช้ข้อความและรูปจากส่วนนี้ในทักแรกที่มี intent
+                เกี่ยวกับสินค้า
+              </p>
+            </div>
+            <input
+              type="checkbox"
+              className="h-5 w-5 accent-white"
+              checked={firstReplyConfig.enabled}
+              onChange={(event) =>
+                updateFirstReplyConfig("enabled", event.target.checked)
+              }
+            />
+          </label>
+
+          <div className="grid gap-4 md:grid-cols-2">
+            <label className="flex items-center gap-3 rounded-2xl border border-zinc-800 bg-zinc-900/40 px-4 py-3 text-sm text-white">
+              <input
+                type="checkbox"
+                className="h-4 w-4 accent-white"
+                checked={firstReplyConfig.triggerOnAnyProductIntent}
+                onChange={(event) =>
+                  updateFirstReplyConfig(
+                    "triggerOnAnyProductIntent",
+                    event.target.checked
+                  )
+                }
+              />
+              ทริกเมื่อทักแรกเกี่ยวกับสินค้า
+            </label>
+
+            <label className="flex items-center gap-3 rounded-2xl border border-zinc-800 bg-zinc-900/40 px-4 py-3 text-sm text-white">
+              <input
+                type="checkbox"
+                className="h-4 w-4 accent-white"
+                checked={firstReplyConfig.triggerOnPriceIntent}
+                onChange={(event) =>
+                  updateFirstReplyConfig(
+                    "triggerOnPriceIntent",
+                    event.target.checked
+                  )
+                }
+              />
+              ทริกเมื่อถามราคา
+            </label>
+
+            <label className="flex items-center gap-3 rounded-2xl border border-zinc-800 bg-zinc-900/40 px-4 py-3 text-sm text-white">
+              <input
+                type="checkbox"
+                className="h-4 w-4 accent-white"
+                checked={firstReplyConfig.triggerOnPromoIntent}
+                onChange={(event) =>
+                  updateFirstReplyConfig(
+                    "triggerOnPromoIntent",
+                    event.target.checked
+                  )
+                }
+              />
+              ทริกเมื่อถามโปร / โปรโมชั่น
+            </label>
+
+            <label className="flex items-center gap-3 rounded-2xl border border-zinc-800 bg-zinc-900/40 px-4 py-3 text-sm text-white">
+              <input
+                type="checkbox"
+                className="h-4 w-4 accent-white"
+                checked={firstReplyConfig.triggerOnCodIntent}
+                onChange={(event) =>
+                  updateFirstReplyConfig(
+                    "triggerOnCodIntent",
+                    event.target.checked
+                  )
+                }
+              />
+              ทริกเมื่อถามเก็บเงินปลายทาง
+            </label>
+          </div>
+
+          <label className="flex items-center gap-3 rounded-2xl border border-zinc-800 bg-zinc-900/40 px-4 py-3 text-sm text-white">
+            <input
+              type="checkbox"
+              className="h-4 w-4 accent-white"
+              checked={firstReplyConfig.suppressAfterCustomerInfo}
+              onChange={(event) =>
+                updateFirstReplyConfig(
+                  "suppressAfterCustomerInfo",
+                  event.target.checked
+                )
+              }
+            />
+            ถ้าลูกค้าส่งชื่อ/เบอร์/ที่อยู่แล้ว ห้ามยิง first reply ซ้ำ
+          </label>
+
+          <div className="grid gap-5 md:grid-cols-2">
+            <div className="space-y-3">
+              <h4 className="text-base font-medium text-white">
+                ข้อความ/รูป เปิดสินค้า
+              </h4>
+              <textarea
+                className={textareaClassName}
+                rows={5}
+                placeholder="เช่น สินค้าตัวนี้ช่วยขจัดคราบมันหนักในครัวได้ดี ใช้งานง่าย เดี๋ยวน้องส่งรายละเอียดให้ดูนะคะ 😊"
+                value={firstReplyConfig.productIntroText}
+                onChange={(event) =>
+                  updateFirstReplyConfig("productIntroText", event.target.value)
+                }
+              />
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <p className="text-sm text-zinc-400">
+                    รูปเปิดสินค้า (1 บรรทัดต่อ 1 รูป)
+                  </p>
+
+                  <label className="inline-flex h-11 cursor-pointer items-center justify-center rounded-xl border border-zinc-700 bg-zinc-950 px-4 text-sm font-medium text-white transition-all duration-200 hover:-translate-y-0.5 hover:border-zinc-500 hover:bg-zinc-900">
+                    {uploadingKey === "first-reply-product" ? "กำลังอัปโหลด..." : "+ เพิ่มรูป"}
+                    <input
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={async (e) => {
+                        const input = e.target;
+                        const file = input.files?.[0];
+                        if (!file) return;
+
+                        await handleFirstReplyProductImageUpload(file);
+                        input.value = "";
+                      }}
+                    />
+                  </label>
+                </div>
+
+                <textarea
+                  className={textareaClassName}
+                  rows={4}
+                  placeholder="ใส่ลิงก์รูปสินค้า 1 บรรทัดต่อ 1 รูป"
+                  value={firstReplyConfig.productIntroImagesText}
+                  onChange={(event) =>
+                    updateFirstReplyConfig(
+                      "productIntroImagesText",
+                      event.target.value
+                    )
+                  }
+                />
+
+                {splitImageUrls(firstReplyConfig.productIntroImagesText).length > 0 && (
+                  <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+                    {splitImageUrls(firstReplyConfig.productIntroImagesText).map((url, index) => (
+                      <img
+                        key={`first-reply-product-${index}`}
+                        src={url}
+                        alt={`first-reply-product-${index}`}
+                        className="h-24 w-full rounded-lg border border-zinc-800 object-cover"
+                      />
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="space-y-3">
+              <h4 className="text-base font-medium text-white">
+                ข้อความ/รูป เปิดโปร
+              </h4>
+              <textarea
+                className={textareaClassName}
+                rows={5}
+                placeholder="เช่น ตอนนี้มีโปรให้เลือกหลายแบบนะคะ เดี๋ยวน้องสรุปตัวที่ขายดีให้ดูค่ะ ✨"
+                value={firstReplyConfig.promoIntroText}
+                onChange={(event) =>
+                  updateFirstReplyConfig("promoIntroText", event.target.value)
+                }
+              />
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <p className="text-sm text-zinc-400">
+                    รูปเปิดโปร (1 บรรทัดต่อ 1 รูป)
+                  </p>
+
+                  <label className="inline-flex h-11 cursor-pointer items-center justify-center rounded-xl border border-zinc-700 bg-zinc-950 px-4 text-sm font-medium text-white transition-all duration-200 hover:-translate-y-0.5 hover:border-zinc-500 hover:bg-zinc-900">
+                    {uploadingKey === "first-reply-promo" ? "กำลังอัปโหลด..." : "+ เพิ่มรูป"}
+                    <input
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      onChange={async (e) => {
+                        const input = e.target;
+                        const file = input.files?.[0];
+                        if (!file) return;
+
+                        await handleFirstReplyPromoImageUpload(file);
+                        input.value = "";
+                      }}
+                    />
+                  </label>
+                </div>
+
+                <textarea
+                  className={textareaClassName}
+                  rows={4}
+                  placeholder="ใส่ลิงก์รูปโปร 1 บรรทัดต่อ 1 รูป"
+                  value={firstReplyConfig.promoIntroImagesText}
+                  onChange={(event) =>
+                    updateFirstReplyConfig("promoIntroImagesText", event.target.value)
+                  }
+                />
+
+                {splitImageUrls(firstReplyConfig.promoIntroImagesText).length > 0 && (
+                  <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+                    {splitImageUrls(firstReplyConfig.promoIntroImagesText).map((url, index) => (
+                      <img
+                        key={`first-reply-promo-${index}`}
+                        src={url}
+                        alt={`first-reply-promo-${index}`}
+                        className="h-24 w-full rounded-lg border border-zinc-800 object-cover"
+                      />
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
           </div>

@@ -56,6 +56,19 @@ type SalesStrategy = {
   urgencyStyle: string;
 };
 
+type FirstReplyConfig = {
+  enabled: boolean;
+  triggerOnAnyProductIntent: boolean;
+  triggerOnPriceIntent: boolean;
+  triggerOnPromoIntent: boolean;
+  triggerOnCodIntent: boolean;
+  productIntroText: string;
+  productIntroImagesText: string;
+  promoIntroText: string;
+  promoIntroImagesText: string;
+  suppressAfterCustomerInfo: boolean;
+};
+
 type ChatHistoryItem = {
   role: "user" | "bot";
   text: string;
@@ -619,6 +632,84 @@ function recentBotText(history: ChatHistoryItem[]): string {
 function isFirstCustomerMessage(history: ChatHistoryItem[]): boolean {
   const userMessages = history.filter((item) => item.role === "user");
   return userMessages.length === 0;
+}
+
+function normalizeFirstReplyConfig(config: any = {}): FirstReplyConfig {
+  return {
+    enabled:
+      typeof config?.enabled === "boolean" ? config.enabled : true,
+    triggerOnAnyProductIntent:
+      typeof config?.triggerOnAnyProductIntent === "boolean"
+        ? config.triggerOnAnyProductIntent
+        : true,
+    triggerOnPriceIntent:
+      typeof config?.triggerOnPriceIntent === "boolean"
+        ? config.triggerOnPriceIntent
+        : true,
+    triggerOnPromoIntent:
+      typeof config?.triggerOnPromoIntent === "boolean"
+        ? config.triggerOnPromoIntent
+        : true,
+    triggerOnCodIntent:
+      typeof config?.triggerOnCodIntent === "boolean"
+        ? config.triggerOnCodIntent
+        : true,
+    productIntroText: config?.productIntroText || "",
+    productIntroImagesText: config?.productIntroImagesText || "",
+    promoIntroText: config?.promoIntroText || "",
+    promoIntroImagesText: config?.promoIntroImagesText || "",
+    suppressAfterCustomerInfo:
+      typeof config?.suppressAfterCustomerInfo === "boolean"
+        ? config.suppressAfterCustomerInfo
+        : true,
+  };
+}
+
+function buildFirstReplyFromTraining(params: {
+  firstReplyConfig: FirstReplyConfig;
+  selectedProduct: ProductItem | null;
+  offersForFirstReply: ProductOffer[];
+  salesStrategy: SalesStrategy;
+}): string {
+  const { firstReplyConfig, selectedProduct, offersForFirstReply, salesStrategy } = params;
+
+  const parts: string[] = [];
+
+  if (firstReplyConfig.productIntroText.trim()) {
+    parts.push(firstReplyConfig.productIntroText.trim());
+  } else if (selectedProduct) {
+    const fallbackProductIntro =
+      selectedProduct.salesNote?.trim() ||
+      selectedProduct.description?.trim() ||
+      salesStrategy.openingStyle?.trim() ||
+      "";
+    if (fallbackProductIntro) {
+      parts.push(fallbackProductIntro);
+    }
+  }
+
+  if (firstReplyConfig.promoIntroText.trim()) {
+    parts.push(firstReplyConfig.promoIntroText.trim());
+  } else if (offersForFirstReply.length > 0) {
+    const offerLines = offersForFirstReply.map((offer, index) => {
+      const priceText = offer.price ? ` ${offer.price} บาท` : "";
+      const noteText = offer.note ? ` (${offer.note})` : "";
+      return `${index + 1}. ${offer.title}${priceText}${noteText}`;
+    });
+
+    parts.push(
+      [
+        "ตอนนี้มีโปรให้เลือกดังนี้ค่ะ ✨",
+        ...offerLines,
+        salesStrategy.closingQuestionStyle?.trim() ||
+          "สนใจแบบไหน แจ้งได้เลยนะคะ 😊",
+      ]
+        .filter(Boolean)
+        .join("\n")
+    );
+  }
+
+  return parts.filter(Boolean).join("\n\n").trim();
 }
 
 function mergeUniqueImageUrls(...groups: string[][]): string[] {
@@ -3497,6 +3588,11 @@ export async function POST(req: Request) {
       enableUrgency: false,
       urgencyStyle: "",
     };
+    const firstReplyConfig: FirstReplyConfig = normalizeFirstReplyConfig(
+      body.firstReplyConfig ||
+        body.chatbot?.firstReplyConfig ||
+        {}
+    );
     const history: ChatHistoryItem[] = Array.isArray(body.history) ? body.history : [];
     const senderName: string = body.senderName || "";
     const chatbot = botId ? await getChatbotById(botId) : null;
@@ -3758,6 +3854,12 @@ export async function POST(req: Request) {
       firstReplyImages
     );
 
+    const effectiveFirstReplyConfig: FirstReplyConfig = normalizeFirstReplyConfig(
+      body.firstReplyConfig ||
+        (chatbot as any)?.firstReplyConfig ||
+        {}
+    );
+
     const faqIntent = isFaqIntent(safeMessage) || selectedFaq !== null;
     const broadPriceIntent = isBroadPriceIntent(safeMessage);
     const explicitOfferSelection = isExplicitOfferSelection(safeMessage);
@@ -3821,6 +3923,24 @@ export async function POST(req: Request) {
       conversationState === "order_summarized" ||
       explicitOfferSelection;
 
+      const codIntent = /เก็บเงินปลายทาง|ปลายทาง|cod/i.test(
+        safeMessage || message || ""
+      );
+      
+      const shouldTriggerConfiguredFirstReply =
+        (effectiveFirstReplyConfig.triggerOnAnyProductIntent &&
+          isInterestIntent(safeMessage || message || "")) ||
+        (effectiveFirstReplyConfig.triggerOnPriceIntent && broadPriceIntent) ||
+        (effectiveFirstReplyConfig.triggerOnPromoIntent &&
+          /โปร|โปรโมชั่น|โปรโมชัน/i.test(safeMessage || message || "")) ||
+        (effectiveFirstReplyConfig.triggerOnCodIntent && codIntent);
+      
+      const shouldSuppressConfiguredFirstReply =
+        effectiveFirstReplyConfig.suppressAfterCustomerInfo &&
+        (hasAnyCustomerInfo ||
+          hasCustomerData ||
+          botAskedForInfo ||
+          containsCustomerInfo(safeMessage || message || ""));
     /**
      * 0) ถ้าสรุปออเดอร์ไปแล้ว และลูกค้าส่งข้อความสั้น ๆ ตามมา
      */
@@ -3869,18 +3989,52 @@ export async function POST(req: Request) {
       !containsCustomerInfo(message) &&
       (broadPriceIntent || isInterestIntent(safeMessage) || bareInterestMessage)
     ) {
-      const reply = buildFirstTouchReply({
+      const shouldUseConfiguredFirstReply =
+        effectiveFirstReplyConfig.enabled &&
+        shouldTriggerConfiguredFirstReply &&
+        !shouldSuppressConfiguredFirstReply;
+
+      const configuredProductImages = parseImageUrls(
+        effectiveFirstReplyConfig.productIntroImagesText || ""
+      );
+
+      const configuredPromoImages = parseImageUrls(
+        effectiveFirstReplyConfig.promoIntroImagesText || ""
+      );
+
+      const configuredReply = buildFirstReplyFromTraining({
+        firstReplyConfig: effectiveFirstReplyConfig,
+        selectedProduct,
+        offersForFirstReply,
+        salesStrategy: effectiveSalesStrategy,
+      });
+
+      const fallbackReply = buildFirstTouchReply({
         product: selectedProduct,
         offers: offersForFirstReply,
         salesStrategy: effectiveSalesStrategy,
       });
 
-      const firstTouchReplyImages = mergeUniqueImageUrls(
-        productImages,
-        firstReplyImages
-      );
+      const reply =
+        shouldUseConfiguredFirstReply && configuredReply.trim()
+          ? configuredReply
+          : fallbackReply;
+
+      const firstTouchReplyImages = shouldUseConfiguredFirstReply
+        ? mergeUniqueImageUrls(
+            configuredProductImages,
+            productImages,
+            configuredPromoImages,
+            firstReplyImages
+          )
+        : mergeUniqueImageUrls(productImages, firstReplyImages);
 
       console.log("CHATBOT_RETURN_FIRST_TOUCH_DEBUG", {
+        usedConfiguredFirstReply: shouldUseConfiguredFirstReply,
+        shouldTriggerConfiguredFirstReply,
+        shouldSuppressConfiguredFirstReply,
+        configuredProductImages,
+        configuredPromoImages,
         replyPreview: reply?.slice(0, 120) || "",
         firstTouchReplyImages,
       });
