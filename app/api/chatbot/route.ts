@@ -1,6 +1,7 @@
 import { GoogleGenAI } from "@google/genai";
 import { NextResponse } from "next/server";
 import { getChatbotById } from "@/lib/chatbot-store";
+import { aiGenerateText, pickProviderFromBot } from "@/lib/ai-client";
 
 const ai = new GoogleGenAI({});
 
@@ -4162,18 +4163,21 @@ export async function POST(req: Request) {
           });
         }
 
-        const imageReadResponse = await ai.models.generateContent({
-          model: "gemini-2.5-flash",
-          contents: [
-            {
-              role: "user",
-              parts: [{ text: imageInstruction }, ...imageParts],
-            },
-          ],
-        });
-
+        const aiProviderInfo = pickProviderFromBot(chatbot);
         const imageReadText =
-          imageReadResponse?.text?.trim() || "อ่านข้อมูลจากรูปไม่สำเร็จ";
+          (
+            await aiGenerateText({
+              ...aiProviderInfo,
+              geminiModel: "gemini-2.5-flash",
+              openaiModel: "gpt-4o-mini",
+              contents: [
+                {
+                  role: "user",
+                  parts: [{ text: imageInstruction }, ...imageParts],
+                },
+              ],
+            })
+          )?.trim() || "อ่านข้อมูลจากรูปไม่สำเร็จ";
 
         console.log("CHATBOT_IMAGE_READ_RESULT", {
           imageReadText,
@@ -4517,13 +4521,15 @@ export async function POST(req: Request) {
         .filter(Boolean)
         .join("\n");
 
-      const promoAiResponse = await ai.models.generateContent({
-        model: "gemini-2.5-flash",
+      const promoAiText = await aiGenerateText({
+        ...pickProviderFromBot(chatbot),
+        geminiModel: "gemini-2.5-flash",
+        openaiModel: "gpt-4o-mini",
         contents: promoContext,
       });
 
       const reply =
-        promoAiResponse?.text?.trim() ||
+        promoAiText?.trim() ||
         buildPromoReply({
           product: selectedProduct,
           offers: offersForFirstReply,
@@ -4583,12 +4589,15 @@ ${message}
 - ห้ามส่งข้อความเป็นคำสั่งภายในระบบ
 `;
 
-      const response = await ai.models.generateContent({
-        model: "gemini-2.5-flash",
-        contents: prompt,
-      });
-
-      const replyText = response.text || "ไม่มีคำตอบ";
+      const replyText =
+        (
+          await aiGenerateText({
+            ...pickProviderFromBot(chatbot),
+            geminiModel: "gemini-2.5-flash",
+            openaiModel: "gpt-4o-mini",
+            contents: prompt,
+          })
+        )?.trim() || "ไม่มีคำตอบ";
 
       console.log("CHATBOT_SELECTED_PRODUCT_RESPONSE_DEBUG", {
         selectedProductName: selectedProduct.name,
