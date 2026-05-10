@@ -2266,17 +2266,68 @@ https://...`}
               className={inputClassName}
             />
 
-            <input
-              placeholder="Webhook Verify Token"
-              value={connection.webhookVerifyToken ?? ""}
-              onChange={(e) =>
-                setConnection({
-                  ...connection,
-                  webhookVerifyToken: e.target.value,
-                })
-              }
-              className={inputClassName}
-            />
+            <div className="rounded-2xl border border-zinc-800 bg-black/40 p-4 space-y-3">
+              <div className="flex items-center justify-between gap-2">
+                <div className="text-sm font-semibold text-white">
+                  Facebook Webhook
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const token =
+                      "vt_" +
+                      Math.random().toString(36).slice(2, 10) +
+                      Date.now().toString(36);
+                    setConnection({ ...connection, webhookVerifyToken: token });
+                    setSaveMessage("สร้าง Verify Token แล้ว — กดบันทึกเพื่อยืนยัน");
+                  }}
+                  className="rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-1 text-xs text-zinc-200 hover:border-emerald-500 hover:text-emerald-300"
+                >
+                  🎲 Generate Verify Token
+                </button>
+              </div>
+
+              <input
+                placeholder="Webhook Verify Token"
+                value={connection.webhookVerifyToken ?? ""}
+                onChange={(e) =>
+                  setConnection({
+                    ...connection,
+                    webhookVerifyToken: e.target.value,
+                  })
+                }
+                className={inputClassName}
+              />
+
+              <div className="space-y-1">
+                <div className="text-xs text-zinc-500">
+                  Callback URL (วางใน Facebook App → Webhooks)
+                </div>
+                <div className="flex items-center gap-2">
+                  <input
+                    readOnly
+                    value={
+                      typeof window !== "undefined"
+                        ? `${window.location.origin}/api/facebook/webhook`
+                        : "/api/facebook/webhook"
+                    }
+                    className={`${inputClassName} bg-zinc-900/60`}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (typeof window === "undefined") return;
+                      const url = `${window.location.origin}/api/facebook/webhook`;
+                      navigator.clipboard?.writeText(url);
+                      setSaveMessage("คัดลอก Callback URL แล้ว");
+                    }}
+                    className="rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-xs text-zinc-200 hover:border-sky-500 hover:text-sky-300"
+                  >
+                    Copy
+                  </button>
+                </div>
+              </div>
+            </div>
 
             <input
               placeholder="Telegram Bot Token"
