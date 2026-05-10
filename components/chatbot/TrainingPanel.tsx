@@ -1539,6 +1539,15 @@ export default function TrainingPanel({
             </div>
 
             <div className="flex items-center gap-2">
+              <a
+                href="/templates/products-template.csv"
+                download="products-template.csv"
+                className="inline-flex h-11 items-center justify-center rounded-xl border border-zinc-700 bg-zinc-900 px-4 text-sm font-medium text-zinc-200 transition hover:border-amber-500 hover:text-amber-200"
+                title="ดาวน์โหลด CSV template ไป upload เข้า Google Sheets"
+              >
+                📄 ดาวน์โหลด CSV Template
+              </a>
+
               <button
                 type="button"
                 onClick={importProductsFromSheet}
