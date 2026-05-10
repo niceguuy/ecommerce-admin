@@ -2,11 +2,12 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Plus, Bot, ChevronRight, Facebook, Trash2 } from "lucide-react";
+import { Plus, Bot, ChevronRight, Facebook, Trash2, Copy } from "lucide-react";
 import {
   CHATBOTS_UPDATED_EVENT,
   createChatbot,
   deleteChatbot,
+  duplicateChatbot,
   getMergedChatbotsFromStorage,
   type ChatbotItem,
 } from "@/lib/chatbots";
@@ -49,6 +50,32 @@ export default function BotListPage() {
 
     deleteChatbot(botId);
     loadBots();
+  };
+
+  const handleDuplicateBot = async (botId: string, botName: string) => {
+    const confirmed = window.confirm(
+      `คัดลอกบอท "${botName}" ทั้ง prompt + สินค้า + กลยุทธ์ (ยกเว้น Token จะถูกล้าง) ?`
+    );
+    if (!confirmed) return;
+
+    const cloned = duplicateChatbot(botId);
+    if (!cloned) {
+      window.alert("คัดลอกไม่สำเร็จ");
+      return;
+    }
+
+    try {
+      await fetch("/api/chatbot/duplicate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sourceId: botId, newId: cloned.id }),
+      });
+    } catch (error) {
+      console.error("server duplicate failed", error);
+    }
+
+    loadBots();
+    router.push(`/chatbot/${cloned.id}`);
   };
 
   return (
@@ -100,6 +127,18 @@ export default function BotListPage() {
                       ? "พักใช้งาน"
                       : "ฉบับร่าง"}
                   </div>
+
+                  <button
+                    type="button"
+                    onClick={() =>
+                      handleDuplicateBot(bot.id, bot.name || bot.promptConfig.botName)
+                    }
+                    className="rounded-xl border border-zinc-800 p-2 text-zinc-400 transition hover:border-sky-500 hover:text-sky-300"
+                    aria-label={`duplicate ${bot.name}`}
+                    title="คัดลอกบอท"
+                  >
+                    <Copy size={16} />
+                  </button>
 
                   <button
                     type="button"

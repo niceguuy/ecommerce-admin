@@ -37,6 +37,9 @@ function normalizeFirstReplyConfig(firstReplyConfig: any = {}) {
 function normalizeConnectionConfig(connection: any = {}) {
   return {
     geminiApiKey: connection?.geminiApiKey || "",
+    openaiApiKey: connection?.openaiApiKey || "",
+    aiProvider:
+      connection?.aiProvider === "openai" ? "openai" : "gemini",
     facebookPageId: connection?.facebookPageId || "",
     facebookPageName: connection?.facebookPageName || "",
     facebookPageAccessToken: connection?.facebookPageAccessToken || "",
