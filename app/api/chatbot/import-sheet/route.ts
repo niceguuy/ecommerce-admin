@@ -63,11 +63,16 @@ function pick(row: Row, ...keys: string[]): string {
   return "";
 }
 
-function normalizeSheetUrl(input: string): string {
+function normalizeSheetUrl(input: string): {
+  primary: string;
+  fallbacks: string[];
+} {
   const url = input.trim();
-  if (!url) return "";
+  if (!url) return { primary: "", fallbacks: [] };
 
-  if (/output=csv/i.test(url) || url.endsWith(".csv")) return url;
+  if (/output=csv/i.test(url) || url.endsWith(".csv")) {
+    return { primary: url, fallbacks: [] };
+  }
 
   const editMatch = url.match(
     /docs\.google\.com\/spreadsheets\/d\/([^/]+)\/?.*?(?:gid=(\d+))?/i
@@ -75,37 +80,67 @@ function normalizeSheetUrl(input: string): string {
   if (editMatch) {
     const id = editMatch[1];
     const gid = editMatch[2] || "0";
-    return `https://docs.google.com/spreadsheets/d/${id}/export?format=csv&gid=${gid}`;
+    return {
+      primary: `https://docs.google.com/spreadsheets/d/${id}/export?format=csv&gid=${gid}`,
+      fallbacks: [
+        `https://docs.google.com/spreadsheets/d/${id}/gviz/tq?tqx=out:csv&gid=${gid}`,
+      ],
+    };
   }
 
-  return url;
+  return { primary: url, fallbacks: [] };
+}
+
+async function fetchSheetCsv(
+  primary: string,
+  fallbacks: string[]
+): Promise<{ ok: boolean; text: string; status: number; tried: string[] }> {
+  const tried: string[] = [];
+
+  for (const url of [primary, ...fallbacks]) {
+    if (!url) continue;
+    tried.push(url);
+    try {
+      const response = await fetch(url, { cache: "no-store", redirect: "follow" });
+      if (!response.ok) continue;
+      const text = await response.text();
+      if (!text || /<!DOCTYPE\s+html/i.test(text.slice(0, 200))) continue;
+      return { ok: true, text, status: response.status, tried };
+    } catch {
+      continue;
+    }
+  }
+
+  return { ok: false, text: "", status: 0, tried };
 }
 
 export async function POST(req: Request) {
   try {
     const { sheetUrl } = await req.json();
-    const csvUrl = normalizeSheetUrl(String(sheetUrl || ""));
+    const { primary, fallbacks } = normalizeSheetUrl(String(sheetUrl || ""));
 
-    if (!csvUrl) {
+    if (!primary) {
       return NextResponse.json(
         { error: "sheetUrl is required" },
         { status: 400 }
       );
     }
 
-    const response = await fetch(csvUrl, { cache: "no-store" });
-    if (!response.ok) {
+    const result = await fetchSheetCsv(primary, fallbacks);
+
+    if (!result.ok) {
       return NextResponse.json(
         {
           error:
             "ดึง Google Sheet ไม่ได้ — ตรวจว่าได้ตั้ง 'แชร์: ทุกคนที่มีลิงก์' แล้ว",
-          status: response.status,
+          tried: result.tried,
+          status: result.status,
         },
         { status: 400 }
       );
     }
 
-    const text = await response.text();
+    const text = result.text;
     const rows = parseCsv(text);
 
     const grouped = new Map<string, any>();
