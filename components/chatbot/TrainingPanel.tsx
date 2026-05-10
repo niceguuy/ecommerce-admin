@@ -80,6 +80,8 @@ type FirstReplyConfig = {
 
 type ConnectionConfig = {
   geminiApiKey: string;
+  openaiApiKey: string;
+  aiProvider: "gemini" | "openai";
   facebookPageId: string;
   facebookPageName: string;
   facebookPageAccessToken: string;
@@ -317,6 +319,8 @@ export default function TrainingPanel({
 
   const [connection, setConnection] = useState<ConnectionConfig>({
     geminiApiKey: "",
+    openaiApiKey: "",
+    aiProvider: "gemini",
     facebookPageId: "",
     facebookPageName: "",
     facebookPageAccessToken: "",
@@ -412,6 +416,8 @@ export default function TrainingPanel({
         const parsed = JSON.parse(savedConnection);
         setConnection({
           geminiApiKey: parsed?.geminiApiKey || "",
+          openaiApiKey: parsed?.openaiApiKey || "",
+          aiProvider: parsed?.aiProvider === "openai" ? "openai" : "gemini",
           facebookPageId: parsed?.facebookPageId || "",
           facebookPageName: parsed?.facebookPageName || "",
           facebookPageAccessToken: parsed?.facebookPageAccessToken || "",
@@ -550,6 +556,53 @@ export default function TrainingPanel({
 
   function addProduct() {
     setProducts((prev) => [...prev, createDefaultProduct(Date.now())]);
+  }
+
+  async function importProductsFromSheet() {
+    const sheetUrl = window.prompt(
+      "วางลิงก์ Google Sheet (ตั้งให้ 'ทุกคนที่มีลิงก์: ผู้ดู')\n\nคอลัมน์ที่รองรับ:\nname, sku, keywords, description, highlights, usage, salesNote, imagesText,\nofferTitle, offerPrice, offerNote, offerImages\n\n(สินค้าตัวเดียวกันใส่หลายแถวได้ ระบบจะรวม offer ให้)"
+    );
+
+    if (!sheetUrl) return;
+
+    try {
+      setSaveMessage("กำลังดึงข้อมูลจาก Google Sheet...");
+
+      const response = await fetch("/api/chatbot/import-sheet", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sheetUrl }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        setSaveMessage(data?.error || "import ไม่สำเร็จ");
+        return;
+      }
+
+      const imported: ProductItem[] = (data?.products || []).map(
+        (p: any, idx: number) =>
+          normalizeProduct(p, Date.now() + idx * 100)
+      );
+
+      if (imported.length === 0) {
+        setSaveMessage("ไม่พบสินค้าใน sheet (ตรวจ header ว่ามีคอลัมน์ name)");
+        return;
+      }
+
+      const merge = window.confirm(
+        `พบสินค้า ${imported.length} ตัว — กด OK = "เพิ่มต่อท้าย", Cancel = "แทนที่ของเดิมทั้งหมด"`
+      );
+
+      setProducts((prev) => (merge ? [...prev, ...imported] : imported));
+      setSaveMessage(
+        `import สำเร็จ ${imported.length} สินค้า — กด "บันทึก" เพื่อยืนยัน`
+      );
+    } catch (error) {
+      console.error(error);
+      setSaveMessage("import ไม่สำเร็จ — เช็ค URL หรือสิทธิ์การแชร์");
+    }
   }
 
   function removeProduct(productId: number) {
@@ -1485,13 +1538,24 @@ export default function TrainingPanel({
               </p>
             </div>
 
-            <button
-              type="button"
-              onClick={addProduct}
-              className="inline-flex h-11 items-center justify-center rounded-xl border border-zinc-700 bg-zinc-950 px-4 text-sm font-medium text-white transition-all duration-200 hover:-translate-y-0.5 hover:border-zinc-500 hover:bg-zinc-900 focus:outline-none focus:ring-2 focus:ring-zinc-500"
-            >
-              + เพิ่มสินค้า
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={importProductsFromSheet}
+                className="inline-flex h-11 items-center justify-center rounded-xl border border-emerald-700 bg-emerald-950/40 px-4 text-sm font-medium text-emerald-200 transition-all duration-200 hover:-translate-y-0.5 hover:border-emerald-500 hover:bg-emerald-900/50 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                title="วางลิงก์ Google Sheet (public) เพื่อ import สินค้าทั้งชุด"
+              >
+                📥 Import จาก Google Sheet
+              </button>
+
+              <button
+                type="button"
+                onClick={addProduct}
+                className="inline-flex h-11 items-center justify-center rounded-xl border border-zinc-700 bg-zinc-950 px-4 text-sm font-medium text-white transition-all duration-200 hover:-translate-y-0.5 hover:border-zinc-500 hover:bg-zinc-900 focus:outline-none focus:ring-2 focus:ring-zinc-500"
+              >
+                + เพิ่มสินค้า
+              </button>
+            </div>
           </div>
 
           <div className="space-y-5">
@@ -2095,11 +2159,55 @@ https://...`}
               </p>
             </div>
 
+            <div className="rounded-2xl border border-zinc-800 bg-black/40 p-4 space-y-3">
+              <div className="text-sm font-semibold text-white">AI Provider</div>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() =>
+                    setConnection({ ...connection, aiProvider: "gemini" })
+                  }
+                  className={`flex-1 rounded-xl border px-4 py-2 text-sm transition ${
+                    (connection.aiProvider ?? "gemini") === "gemini"
+                      ? "border-sky-500 bg-sky-950/40 text-sky-200"
+                      : "border-zinc-800 bg-zinc-950 text-zinc-400 hover:border-zinc-600"
+                  }`}
+                >
+                  Google Gemini
+                </button>
+                <button
+                  type="button"
+                  onClick={() =>
+                    setConnection({ ...connection, aiProvider: "openai" })
+                  }
+                  className={`flex-1 rounded-xl border px-4 py-2 text-sm transition ${
+                    connection.aiProvider === "openai"
+                      ? "border-emerald-500 bg-emerald-950/40 text-emerald-200"
+                      : "border-zinc-800 bg-zinc-950 text-zinc-400 hover:border-zinc-600"
+                  }`}
+                >
+                  OpenAI
+                </button>
+              </div>
+              <p className="text-xs text-zinc-500">
+                ปล่อย Key ว่างได้ ระบบจะใช้ค่า default จาก env (GEMINI_API_KEY / OPENAI_API_KEY)
+              </p>
+            </div>
+
             <input
               placeholder="Gemini API Key"
               value={connection.geminiApiKey ?? ""}
               onChange={(e) =>
                 setConnection({ ...connection, geminiApiKey: e.target.value })
+              }
+              className={inputClassName}
+            />
+
+            <input
+              placeholder="OpenAI API Key (sk-...)"
+              value={connection.openaiApiKey ?? ""}
+              onChange={(e) =>
+                setConnection({ ...connection, openaiApiKey: e.target.value })
               }
               className={inputClassName}
             />

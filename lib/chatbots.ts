@@ -14,6 +14,8 @@ export type PromptConfig = {
 
 export type ConnectionConfig = {
   geminiApiKey: string;
+  openaiApiKey: string;
+  aiProvider: "gemini" | "openai";
   facebookPageId: string;
   facebookPageName: string;
   facebookPageAccessToken: string;
@@ -66,6 +68,8 @@ export const chatbotItems: ChatbotItem[] = [
     },
     connectionConfig: {
       geminiApiKey: "",
+      openaiApiKey: "",
+      aiProvider: "gemini",
       facebookPageId: "",
       facebookPageName: "A - Cleaner Thailand",
       facebookPageAccessToken: "",
@@ -100,6 +104,8 @@ export const chatbotItems: ChatbotItem[] = [
     },
     connectionConfig: {
       geminiApiKey: "",
+      openaiApiKey: "",
+      aiProvider: "gemini",
       facebookPageId: "",
       facebookPageName: "A - Cleaner Thailand",
       facebookPageAccessToken: "",
@@ -257,6 +263,8 @@ export function createChatbot() {
     },
     connectionConfig: {
       geminiApiKey: "",
+      openaiApiKey: "",
+      aiProvider: "gemini",
       facebookPageId: "",
       facebookPageName: "",
       facebookPageAccessToken: "",
@@ -273,4 +281,45 @@ export function createChatbot() {
   writeStorage(nextBots);
 
   return newBot;
+}
+
+export function duplicateChatbot(botId: string): ChatbotItem | null {
+  const bots = readStorage();
+  const source = bots.find((bot) => bot.id === botId);
+
+  if (!source) return null;
+
+  const id = `bot-${Date.now()}`;
+  const baseName = (source.name || "บอท").trim();
+
+  const cloned: ChatbotItem = {
+    ...source,
+    id,
+    name: `${baseName} (สำเนา)`,
+    pageName: "ยังไม่เชื่อมเพจ",
+    status: "draft",
+    botEnabled: false,
+    description: "คัดลอกจาก " + baseName + " — กรุณาตั้ง Token ใหม่",
+    promptConfig: {
+      ...source.promptConfig,
+      botName: `${source.promptConfig?.botName || baseName} (สำเนา)`,
+    },
+    connectionConfig: {
+      ...source.connectionConfig,
+      facebookPageId: "",
+      facebookPageName: "",
+      facebookPageAccessToken: "",
+      facebookAppId: "",
+      facebookAppSecret: "",
+      webhookVerifyToken: "",
+      telegramBotToken: "",
+      telegramChatId: "",
+      telegramThreadId: "",
+    },
+  };
+
+  const nextBots = [cloned, ...bots];
+  writeStorage(nextBots);
+
+  return cloned;
 }
