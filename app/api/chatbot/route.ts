@@ -4610,6 +4610,42 @@ ${message}
       });
     }
 
+    const fallbackPrompt = `
+${effectiveBotRole || "คุณคือแอดมินฝ่ายขายของร้านค้าออนไลน์ ตอบสุภาพ เป็นกันเอง"}
+
+กติกา:
+${effectiveBotRules || "- ห้ามเดาข้อมูลสินค้า\n- ถ้าไม่มีข้อมูลให้ถามลูกค้ากลับสั้น ๆ"}
+
+ประวัติการสนทนา:
+${historyToText(history) || "-"}
+
+ข้อความล่าสุดของลูกค้า:
+${message}
+
+แนวทาง:
+- ตอบแบบแอดมินขายของจริงในไทย
+- สั้น กระชับ อ่านง่าย ไม่แข็ง
+- ถ้าลูกค้าถามสินค้า ให้ถามว่าสนใจรุ่นไหน/ใช้กับอะไร
+- ห้ามตอบเป็นคำสั่งภายในระบบ
+`;
+
+    const fallbackText =
+      (
+        await aiGenerateText({
+          ...pickProviderFromBot(chatbot),
+          geminiModel: "gemini-2.5-flash",
+          openaiModel: "gpt-4o-mini",
+          contents: fallbackPrompt,
+        })
+      )?.trim() ||
+      (chatbot as any)?.promptConfig?.welcomeMessage ||
+      "สวัสดีค่ะ สอบถามสินค้าอะไร แจ้งน้องได้เลยนะคะ 😊";
+
+    return NextResponse.json({
+      reply: fallbackText,
+      images: [],
+    });
+
   } catch (error) {
     console.error("CHATBOT_ERROR:", error);
     return NextResponse.json(
